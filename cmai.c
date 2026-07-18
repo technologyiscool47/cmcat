@@ -389,3 +389,45 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // super impo
 
     return output; // returns the returning outputtive output
 }
+
+typedef struct { // We're doing transformers now
+    layer feedforward; // layer
+} transformer_block; // Alias
+
+transformer_block *createTransformerBlock(int input_size, int hidden_size, double (*activation)(double)) { // creates a transformer block. takes an input size, a hidden size and an activation
+    transformer_block *block = malloc(sizeof(transformer_block)); // allocates the block
+    if (block == NULL) return NULL;
+    block->feedforward.weights = newMatrix(input_size, hidden_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
+    block->feedforward.biases = newMatrix(1, hidden_size); // sets the biases to a matrix of 1 row and hidden_size columns
+    block->feedforward.activation = activation; // sets the activation to activation
+
+    int i; // i dont know what int i means. very secret
+    for (i = 0; i < input_size * hidden_size; i++) // for loop
+        block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the  weights randomly
+
+    return block; // returns the meaning of life
+}
+
+void freeTransformerBlock(transformer_block *block) { // function that frees the Transformer block
+    if (block == NULL) return; // if there's no block, return
+    freeMatrix(block->feedforward.weights); // frees
+    freeMatrix(block->feedforward.biases);
+    free(block);
+}
+
+matrix *transformer_block_forward(matrix *input, transformer_block *block) { // forward pass (which i HATE) on a transformer blocks
+    matrix *attn_out = attention(input, input, input); // attention OUTput
+
+    matrix *after_attn = addMatrix(input, attn_out); // after attention
+    freeMatrix(attn_out); // frees attn_out
+
+    matrix *preact = newMatrix(input->rows, block->feedforward.biases->columns); // preact matrix creation
+    matrix *ff_out = forward(&block->feedforward, input, preact); // ff_out matrix creation
+
+    matrix *output = addMatrix(after_attn, ff_out); // adds after_attn and ff_out together
+    freeMatrix(after_attn); // frees everything else
+    freeMatrix(preact);
+    freeMatrix(ff_out);
+
+    return output; // returns the output
+}
