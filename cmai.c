@@ -2,6 +2,8 @@
 #include <stdlib.h> // same but for stdlib.h
 #include <math.h> // BOOOORINGGGGGG
 
+#define LN_EPSILON 1e-5 // super small number. is used later on
+
 
 
 // WARNING: At the time i'm writing this, i am a complete beginner to C. i apologise for the comments
@@ -211,6 +213,36 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
 
 }
 
+matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYERnorm to distinguish from another thing called batch normalization, which is older and worse.
+                               // i repeat, it takes a MATRIX, not a layer. do not confuse the two. it is named layer normalization because it is not batch normalization
+                               // do not confuse yourself
+
+    matrix *out = newMatrix(m->rows, m->columns); // output matrix
+    int i, j; // loop variables!!!
+    double mean, variance, std_dev; // more variables
+    mean = 0; // sets mean to 0
+
+    for (i = 0; i < m->rows; i++) { // loopy loop loop!!! loops through rows
+        for (j = 0; j < m->columns; j++) { // loops through columns
+            mean += m->data[i * m->columns + j]; // adds together mean and m's data at i rows and j columns
+        }
+        mean /= m->columns; // divides mean by m's columns
+
+        variance = 0; // variance time
+        for (j = 0; j < m->columns; j++) { // loops through columns
+            double diff = m->data[i * m->columns + j] - mean; // sets diff to m's data at i and j
+            variance += diff * diff; // math
+        }
+        variance /= m->columns; // divides variance by columns
+
+        std_dev = sqrt(variance + LN_EPSILON); // sets std_dev to the square root of variance and epsilon (small number)
+        for (j = 0; j < m->columns; j++) { // another loop through columns
+            double normalized = (m->data[i * m->columns + j] - mean) / std_dev; // sets normalized to m's data subtracted by mean divided by std_dev
+            setVal(out, i, j, normalized); // sets out to normalized
+        }
+    }
+    return out; // returns
+}
 
 /* ------------ *\
    | Networks |
@@ -391,17 +423,46 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // super impo
 }
 
 typedef struct { // We're doing transformers now
+    layer wq; // Query projection
+    layer wk; // Key projection
+    layer wv; // Value projection
+    layer wo; // Output projection
     layer feedforward; // layer
 } transformer_block; // Alias
 
 transformer_block *createTransformerBlock(int input_size, int hidden_size, double (*activation)(double)) { // creates a transformer block. takes an input size, a hidden size and an activation
     transformer_block *block = malloc(sizeof(transformer_block)); // allocates the block
     if (block == NULL) return NULL;
+
+    block->wq.weights = newMatrix(input_size, input_size); // projection layer time. this is all just initialization, i wont comment on it
+    block->wq.biases = newMatrix(1, input_size);
+    block->wq.activation = relu; // projections usually use relu so we'll use that
+
+    block->wk.weights = newMatrix(input_size, input_size);
+    block->wk.biases = newMatrix(1, input_size);
+    block->wk.activation = relu;
+
+    block->wv.weights = newMatrix(input_size, input_size);
+    block->wv.biases = newMatrix(1, input_size);
+    block->wv.activation = relu;
+
+    block->wo.weights = newMatrix(input_size, input_size);
+    block->wo.biases = newMatrix(1, input_size);
+    block->wo.activation = relu;
+
+    // Randomize the projection weights
+    int i;
+    for (i = 0; i < input_size * input_size; i++) {
+        block->wq.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
+        block->wk.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
+        block->wv.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
+        block->wo.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
+    }
+
     block->feedforward.weights = newMatrix(input_size, hidden_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
     block->feedforward.biases = newMatrix(1, hidden_size); // sets the biases to a matrix of 1 row and hidden_size columns
     block->feedforward.activation = activation; // sets the activation to activation
 
-    int i; // i dont know what int i means. very secret
     for (i = 0; i < input_size * hidden_size; i++) // for loop
         block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the  weights randomly
 
@@ -412,20 +473,56 @@ void freeTransformerBlock(transformer_block *block) { // function that frees the
     if (block == NULL) return; // if there's no block, return
     freeMatrix(block->feedforward.weights); // frees
     freeMatrix(block->feedforward.biases);
+
+    freeMatrix(block->wq.weights); // projection freeing. no comment
+    freeMatrix(block->wq.biases);
+
+    freeMatrix(block->wk.weights);
+    freeMatrix(block->wk.biases);
+
+    freeMatrix(block->wv.weights);
+    freeMatrix(block->wv.biases);
+
+    freeMatrix(block->wo.weights);
+    freeMatrix(block->wo.biases);
+
     free(block);
 }
 
-matrix *transformer_block_forward(matrix *input, transformer_block *block) { // forward pass (which i HATE) on a transformer blocks
-    matrix *attn_out = attention(input, input, input); // attention OUTput
+matrix *transformerForward(matrix *input, transformer_block *block) { // forward pass (which i HATE) on a transformer blocks
+    matrix *norm1 = layerNorm(input); // attention OUTput
 
-    matrix *after_attn = addMatrix(input, attn_out); // after attention
-    freeMatrix(attn_out); // frees attn_out
+    matrix *preact_q = newMatrix(norm1->rows, block->wq.weights->columns); // making new matrices for the projections
+    matrix *preact_k = newMatrix(norm1->rows, block->wk.weights->columns);
+    matrix *preact_v = newMatrix(norm1->rows, block->wv.weights->columns);
+    matrix *Q = forward(&block->wq, norm1, preact_q); // ughhh
+    matrix *K = forward(&block->wk, norm1, preact_k);
+    matrix *V = forward(&block->wv, norm1, preact_v);
 
-    matrix *preact = newMatrix(input->rows, block->feedforward.biases->columns); // preact matrix creation
-    matrix *ff_out = forward(&block->feedforward, input, preact); // ff_out matrix creation
+    matrix *attn_out = attention(Q, K, V); // after attention
 
-    matrix *output = addMatrix(after_attn, ff_out); // adds after_attn and ff_out together
+    matrix *preact_o = newMatrix(attn_out->rows, block->wo.weights->columns); // preact output
+    matrix *proj_out = forward(&block->wo, attn_out, preact_o); // projection output
+
+    matrix *after_attn = addMatrix(input, proj_out); // after attention
+    freeMatrix(norm1); // freeing time
+    freeMatrix(preact_q);
+    freeMatrix(Q);
+    freeMatrix(preact_k);
+    freeMatrix(K);
+    freeMatrix(preact_v);
+    freeMatrix(V);
+    freeMatrix(attn_out);
+    freeMatrix(preact_o);
+    freeMatrix(proj_out);
+
+    matrix *norm2 = layerNorm(after_attn); // preact matrix creation
+    matrix *preact = newMatrix(norm2->rows, block->feedforward.biases->columns); // ff_out matrix creation
+    matrix *ff_out = forward(&block->feedforward, norm2, preact); // adds after_attn and ff_out together
+
+    matrix *output = addMatrix(after_attn, ff_out);
     freeMatrix(after_attn); // frees everything else
+    freeMatrix(norm2);
     freeMatrix(preact);
     freeMatrix(ff_out);
 

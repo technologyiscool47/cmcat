@@ -1,25 +1,45 @@
 # cmcat
+
 local LLM from scratch
 
 ## Info about the project
+
 ### Name
+
 I named it cmcat because i recently saw [a wikipedia article about the Chinese Mountain Cat](https://en.wikipedia.org/wiki/Chinese_mountain_cat) and i thought it looked cute.
+
 ### Completeness
+
 This is not complete (yet). Do not expect this to work well. Do not expect it to work.
+
 ### Goal
+
 i want to have a local llm i can run on my pc <sup>(Intel Xeon E5-2620 v3 @ 2.40GHz and NVIDIA GeForce GTX 1050 w/ 2GB VRAM)</sup> and be happy with the speed and intelligence.
+
+There have been many tiny little breakthroughs in the world of LLMs over the years, like BitNet b1.58 or literally everything in Deepseek v4 or [colibrì](https://github.com/JustVugg/colibri). I wanted to, first of all, make my own LLM (for cool points) and second of all, combine everything i find into one and make my project very fast.
+
 ### Contributing
+
 Yes please!!!!!! if you have any questions, ask me somehow
+
 #### Usage of AI in contributions
+
 As long as it:
+
 - Works
 - Isn't super obvious
 - I can't tell if it's AI-generated
-you can contribute. Either way, please tell me if you used AI and where you did it. Don't be shy :)
+
+you can contribute.
+
+Either way, please tell me if you used AI and where you did it. Don't be shy :)
+
 ### License
+
 GPL v3
 
 ## Dear diary,
+
 today I made a **big** mistake.
 
 I have used many LLMs over the years. Around 2023, when the first versions of ChatGPT came out, they left an amazing first impression on me. I have talked to different voice assistants before, but this was something *different*. It was a magic black box that could talk to you, understand (kind of) and even **code**.
@@ -31,5 +51,11 @@ Then, the big evil companies started making super tiny models with the architect
 Diary, i now have to confess to you that i decided to put this into my own hands. I am a very gifted person, i was gifted the power of DETERMINATION (haha undertale reference), so i started writing my own LLM. Over the past few months i have seen many small advancements in optimization, but they dont get used much in local AI. i decided to combine everything into one (not so) giant piece of code. I found it to be a tiny bit hard. 
 
 I had to continue writing it because of my DETERMINATION. I now have a crippling addiction to writing an AI in C. I physically cannot stop. Help
+
+
+
+
+
+
 
 <sub>i do not know how to use markdown properly. if anyone can help me make the readme prettier, please do.</sub>
