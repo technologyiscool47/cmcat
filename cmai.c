@@ -578,3 +578,31 @@ matrix *embeddingForward(embedding *e, int *token_ids, int seq_len) { // forward
 
     return out; // returns
 }
+
+matrix *positionalEncoding(int seq_len, int d_model) { // new function. We're doing positional encoding ¡
+    matrix *pe = newMatrix(seq_len, d_model); // makes a matrix called pe
+    int i, j; // loop cariables
+
+    for (i = 0; i < seq_len; i++) { // loops through rows
+        for (j = 0; j < d_model; j++) { // loops through columns
+            double freq = 1.0 / pow(10000.0, (2.0 * ((double)j / 2.0)) / d_model); // frequency variable
+
+            if (j % 2 == 0) { // if j is even
+                setVal(pe, i, j, sin(i * freq)); // sets sine
+            } else { // else
+                setVal(pe, i, j, cos(i * freq)); // sets cosine
+            }
+        }
+    }
+    return pe; // returns pe
+}
+
+matrix *unembeddingForward(matrix *input, layer *unembed) { // unembedding forward pass (which i HATE)
+    matrix *preact = newMatrix(input->rows, unembed->weights->columns); // preact matrix
+    matrix *logits = forward(unembed, input, preact); // logits matrix, forward pass
+
+    freeMatrix(preact); // frees preact matrix
+    softmax(logits); // softmaxes the logits
+
+    return logits; // returns the logits
+}
