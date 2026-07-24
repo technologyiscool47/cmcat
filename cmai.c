@@ -528,3 +528,53 @@ matrix *transformerForward(matrix *input, transformer_block *block) { // forward
 
     return output; // returns the output
 }
+
+typedef struct { // embedding struct
+    matrix *weights; // giant lookup table for the embeddings
+    int vocab_size; // vocab size
+    int embedding_dim; // embedding dimensions
+} embedding; // alias
+
+embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function, makes an embedding, takes vocab size and the dimensions :thumbsup:
+    embedding *e = malloc(sizeof(embedding)); // allocates
+    if (e == NULL) return NULL; // error handling
+
+    e->vocab_size = vocab_size; // sets vocab size
+    e->embedding_dim = embedding_dim; // sets embedding dimensions
+    e->weights = newMatrix(vocab_size, embedding_dim); // sets weights
+
+    int i; // i
+    for (i = 0; i < vocab_size * embedding_dim; i++) { // for loop
+        e->weights->data[i] = (rand() % 100) / 100.0 - 0.5; // randomizes dimensions
+    }
+
+    return e; // returns e
+}
+
+void freeEmbedding(embedding *e) { // frees an embedding
+    if (e == NULL) return; // error handling
+    freeMatrix(e->weights); // free the lookup table
+    free(e); // free the struct
+}
+
+matrix *embeddingForward(embedding *e, int *token_ids, int seq_len) { // forward pass (I HATE THEM AJDAKASDKFHK) for an embedding
+    matrix *out = newMatrix(seq_len, e->embedding_dim); // outout matrix
+
+    int i, j; // loop variables
+    for (i = 0; i < seq_len; i++) { // loops through the sequence length
+        int token_id = token_ids[i]; // sets the token ids
+
+
+        if (token_id < 0 || token_id >= e->vocab_size) { // Bounds check! don't look for a token that doesn't exist
+            printf("token %d is out of bounds!", token_id); // error message
+            continue;
+        }
+
+        for (j = 0; j < e->embedding_dim; j++) { // loop
+            double val = getVal(e->weights, token_id, j); // gets a vector
+            setVal(out, i, j, val); // puts it in an output
+        }
+    }
+
+    return out; // returns
+}
