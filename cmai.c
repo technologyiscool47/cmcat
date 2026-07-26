@@ -32,6 +32,10 @@ matrix *newMatrix(int rows, int columns) { // create a function (the code i used
     m->rows = rows; // set the m pointer's rows to the function's rows
     m->columns = columns; // same but with columns
     m->data = malloc(rows * columns * sizeof(double)); // allocates the m pointer's data
+    if (!m->data) { // checks if the allocation succeeded
+        free(m); // frees m
+        return NULL; // returns null
+    }
 
     int i; // creates a variable named i, for a loop
 
@@ -48,7 +52,8 @@ void freeMatrix(matrix *m) { // makes a function named freeMatrix, it takes a po
 }
 
 double getVal(matrix *m, int row, int col) { // makes a function called getval, takes a matrix pointer, rows value and columns value
-    if (row < 0 || row >= m->rows || col < 0 || col >= m->columns) return -1; // bounds check
+    if (row < 0 || row >= m->rows || col < 0 || col >= m->columns) return NAN; // bounds check
+    if (m == NULL) return NAN; // m being null check
     return m->data[row * m->columns + col]; // returns
 }
 
@@ -220,9 +225,10 @@ matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYER
     matrix *out = newMatrix(m->rows, m->columns); // output matrix
     int i, j; // loop variables!!!
     double mean, variance, std_dev; // more variables
-    mean = 0; // sets mean to 0
 
     for (i = 0; i < m->rows; i++) { // loopy loop loop!!! loops through rows
+        mean = 0; // sets mean to 0
+
         for (j = 0; j < m->columns; j++) { // loops through columns
             mean += m->data[i * m->columns + j]; // adds together mean and m's data at i rows and j columns
         }
@@ -418,6 +424,7 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // super impo
 
     matrix *output = multiplyMatrix(scores, values); // output = scores * values
     freeMatrix(keys_t); // free the transposed keys
+    freeMatrix(scores);
 
     return output; // returns the returning outputtive output
 }
