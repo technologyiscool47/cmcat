@@ -608,7 +608,7 @@ matrix *unembeddingForward(matrix *input, layer *unembed) { // unembedding forwa
 }
 
 typedef struct { // new struct!!!! transformer networksssss
-    transformer_block *blocks; // the transformer blocks
+    transformer_block **blocks; // the transformer blocks
     int num_blocks; // how many blocks
 } transformer_network; // alias
 
@@ -617,11 +617,11 @@ transformer_network *createTransformerNetwork(int num_blocks, int input_size, in
 
     transformer_network *net = malloc(sizeof(transformer_network)); // allocates the network
     net->num_blocks = num_blocks; // sets number of blocks
-    net->blocks = malloc(num_blocks * sizeof(transformer_block)); // allocates blocks
+    net->blocks = malloc(num_blocks * sizeof(transformer_block *)); // allocates blocks
 
     int i; // loop variable
     for (i = 0; i < num_blocks; i++) { // loops through number of blocks
-        net->blocks[i] = *createTransformerBlock(input_size, hidden_size, activation); // creates the blocks
+        net->blocks[i] = createTransformerBlock(input_size, hidden_size, activation); // creates the blocks
     }
 
     return net; // returns the network
@@ -631,7 +631,7 @@ void freeTransformerNetwork(transformer_network *net) { // frees a transformer n
     if (net == NULL) return; // if the network is null, return
     int i; // loop variable
     for (i = 0; i < net->num_blocks; i++) { // loops through blocks
-        freeTransformerBlock(&net->blocks[i]); // frees blocks
+        freeTransformerBlock(net->blocks[i]); // frees blocks
     }
     free(net->blocks); // frees blocks Again(TM)
     free(net); // frees network
@@ -642,7 +642,7 @@ matrix *transformerNetworkForward(matrix *input, transformer_network *net) { // 
     int i; // int i
 
     for (i = 0; i < net->num_blocks; i++) { // loops through blocks
-        matrix *next = transformerForward(current, &net->blocks[i]); // forward pass REAL 100% FREE DOWNLOAD NO SMS NO EMAIL :thumbsup: DOWNLOAD NOW
+        matrix *next = transformerForward(current, net->blocks[i]); // forward pass REAL 100% FREE DOWNLOAD NO SMS NO EMAIL :thumbsup: DOWNLOAD NOW
         if (current != input) { // if current isnt the input, free it
             freeMatrix(current); // free it
         }
