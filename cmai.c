@@ -658,3 +658,18 @@ matrix *transformerNetworkForward(matrix *input, transformer_network *net) { // 
 
     return current; // returns current
 }
+
+double crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entropy loss, the type of loss they use in llms. takes a matrix of predictions and the target tokens
+    double loss = 0; // creates the loss variable
+    int i; // i
+
+    for (i = 0; i < predicted->rows; i++) { //loops
+        int target = target_tokens[i]; // target variable
+        double prob = getVal(predicted, i, target); // probability variable
+        loss += -log(prob + LN_EPSILON); // negative log of probability. punishes ai heavily if it confidently says the wrong thing. adds epsilon because -log of 0 is infinity
+    }
+
+    loss = loss/predicted->rows; // divides loss to get average
+    return loss; // returns
+}
+
