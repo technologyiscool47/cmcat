@@ -429,6 +429,47 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // super impo
     return output; // returns the returning outputtive output
 }
 
+typedef struct { // new struct!!!!! we lowkey have to save some values in transformerForward that were previously (if you want to see what i mean, go into a previous commit. we love git) being freed for simplicity
+    matrix *input; // self explanatory
+    matrix *norm1; // same
+    matrix *Q; // same
+    matrix *K; // same
+    matrix *V; // same
+    matrix *preact_q; // same
+    matrix *preact_k; // same
+    matrix *preact_v; // same
+    matrix *preact_o; // same
+    matrix *preact_ff; // same
+    matrix *attn_out; // same
+    matrix *after_attn; // same
+    matrix *norm2; // same
+    matrix *ff_out; // same
+    matrix *output; // same
+} transformer_cache; // alias
+
+transformer_cache *createTransformerCache() { // create transformer cache function
+    transformer_cache *cache = malloc(sizeof(transformer_cache)); // allocates a transformer cache
+    if (cache == NULL) return NULL; // error check
+    return cache; // returns
+}
+
+void freeTransformerCache(transformer_cache *cache) { // free transformer cache function
+    if (cache == NULL) return; // checks if cache is null
+    freeMatrix(cache->norm1); // free everything inside the transformer cache
+    freeMatrix(cache->Q);
+    freeMatrix(cache->K);
+    freeMatrix(cache->V); // ok
+    freeMatrix(cache->preact_q);
+    freeMatrix(cache->preact_k);
+    freeMatrix(cache->preact_v);
+    freeMatrix(cache->attn_out);
+    freeMatrix(cache->after_attn);
+    freeMatrix(cache->norm2);
+    freeMatrix(cache->ff_out);
+    freeMatrix(cache->output);
+    free(cache);
+}
+
 typedef struct { // We're doing transformers now
     layer wq; // Query projection
     layer wk; // Key projection
@@ -444,7 +485,6 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     block->wq.weights = newMatrix(input_size, input_size); // projection layer time. this is all just initialization, i wont comment on it
     block->wq.biases = newMatrix(1, input_size);
     block->wq.activation = relu; // projections usually use relu so we'll use that
-
     block->wk.weights = newMatrix(input_size, input_size);
     block->wk.biases = newMatrix(1, input_size);
     block->wk.activation = relu;
@@ -496,45 +536,35 @@ void freeTransformerBlock(transformer_block *block) { // function that frees the
     free(block);
 }
 
-matrix *transformerForward(matrix *input, transformer_block *block) { // forward pass (which i HATE) on a transformer blocks
-    matrix *norm1 = layerNorm(input); // attention OUTput
+matrix *transformerForward(matrix *input, transformer_block *block, transformer_cache *cache) { // forward pass (which i HATE) on a transformer blocks. transformer caches make me sad
+    cache->input = input; // saving input for backprop
 
-    matrix *preact_q = newMatrix(norm1->rows, block->wq.weights->columns); // making new matrices for the projections
-    matrix *preact_k = newMatrix(norm1->rows, block->wk.weights->columns);
-    matrix *preact_v = newMatrix(norm1->rows, block->wv.weights->columns);
-    matrix *Q = forward(&block->wq, norm1, preact_q); // ughhh
-    matrix *K = forward(&block->wk, norm1, preact_k);
-    matrix *V = forward(&block->wv, norm1, preact_v);
+    cache->norm1 = layerNorm(input); // attention OUTput
 
-    matrix *attn_out = attention(Q, K, V); // after attention
+    cache->preact_q = newMatrix(cache->norm1->rows, block->wq.weights->columns); // making new matrices for the projections
+    cache->preact_k = newMatrix(cache->norm1->rows, block->wk.weights->columns);
+    cache->preact_v = newMatrix(cache->norm1->rows, block->wv.weights->columns);
+    cache->Q = forward(&block->wq, cache->norm1, cache->preact_q); // ughhh
+    cache->K = forward(&block->wk, cache->norm1, cache->preact_k);
+    cache->V = forward(&block->wv, cache->norm1, cache->preact_v);
 
-    matrix *preact_o = newMatrix(attn_out->rows, block->wo.weights->columns); // preact output
-    matrix *proj_out = forward(&block->wo, attn_out, preact_o); // projection output
+    cache->attn_out = attention(cache->Q, cache->K, cache->V); // attention things
 
-    matrix *after_attn = addMatrix(input, proj_out); // after attention
-    freeMatrix(norm1); // freeing time
-    freeMatrix(preact_q);
-    freeMatrix(Q);
-    freeMatrix(preact_k);
-    freeMatrix(K);
-    freeMatrix(preact_v);
-    freeMatrix(V);
-    freeMatrix(attn_out);
-    freeMatrix(preact_o);
+    cache->preact_o = newMatrix(cache->attn_out->rows, block->wo.weights->columns); // preact output
+    matrix *proj_out = forward(&block->wo, cache->attn_out, cache->preact_o); // projection output
+
+    cache->after_attn = addMatrix(input, proj_out); // after attention
+
     freeMatrix(proj_out);
 
-    matrix *norm2 = layerNorm(after_attn); // preact matrix creation
-    matrix *preact = newMatrix(norm2->rows, block->feedforward.biases->columns); // ff_out matrix creation
-    matrix *ff_out = forward(&block->feedforward, norm2, preact); // adds after_attn and ff_out together
+    cache->norm2 = layerNorm(cache->after_attn); // norm 2
+    cache->preact_ff = newMatrix(cache->norm2->rows, block->feedforward.biases->columns); // preact_ff matrix creation
+    cache->ff_out = forward(&block->feedforward, cache->norm2, cache->preact_ff); // ff out forward pass thing
 
-    matrix *output = addMatrix(after_attn, ff_out);
-    freeMatrix(after_attn); // frees everything else
-    freeMatrix(norm2);
-    freeMatrix(preact);
-    freeMatrix(ff_out);
+    cache->output = addMatrix(cache->after_attn, cache->ff_out);
 
-    return output; // returns the output
-}
+    return cache->output; // returns the output
+} // I want to make one thing clear: cmcat is not a learning project. It's two sevenths of a learning project at most, and even if it is, i am learning C. I am a complete poser in the world of AI and i do not mind it.
 
 typedef struct { // embedding struct
     matrix *weights; // giant lookup table for the embeddings
@@ -644,15 +674,13 @@ void freeTransformerNetwork(transformer_network *net) { // frees a transformer n
     free(net); // frees network
 }
 
-matrix *transformerNetworkForward(matrix *input, transformer_network *net) { // forward pass on a transformer network
+matrix *transformerNetworkForward(matrix *input, transformer_network *net, transformer_cache **caches) { // forward pass on a transformer network
     matrix *current = input; // sets current matrix to current matrix
     int i; // int i
 
     for (i = 0; i < net->num_blocks; i++) { // loops through blocks
-        matrix *next = transformerForward(current, net->blocks[i]); // forward pass REAL 100% FREE DOWNLOAD NO SMS NO EMAIL :thumbsup: DOWNLOAD NOW
-        if (current != input) { // if current isnt the input, free it
-            freeMatrix(current); // free it
-        }
+        caches[i] = createTransformerCache(); // creates transformer caches for each block
+        matrix *next = transformerForward(current, net->blocks[i], caches[i]); // forward pass REAL 100% FREE DOWNLOAD NO SMS NO EMAIL :thumbsup: DOWNLOAD NOW
         current = next; // sets current to next
     }
 
@@ -673,3 +701,138 @@ double crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entrop
     return loss; // returns
 }
 
+void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *output_grad) { // cross entropy loss gradient thing. basically, when training, you have to use a combination of the loss
+    int i, j; // loop variable                                                              // and softmax and it is very complicated, however, when you simplify the big scary equation you literally
+    for (i = 0; i < predicted->rows; i++) { // rows loop                                    // get is taking your predicted probabilities, and subtract 1 from the correct answer
+        int target = target_tokens[i]; // target
+
+        for (j = 0; j < predicted->columns; j++) { // column loop
+            double prob = getVal(predicted, i, j); // probablility
+
+            if (j == target) // if ai got it right
+                setVal(output_grad, i, j, prob - 1.0); // nudge it towards more confidence
+            else // else
+                setVal(output_grad, i, j, prob - 0.0); // nudge it towards the right answer
+        }
+    }
+}
+
+void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, matrix **Q_grad, matrix **K_grad, matrix **V_grad) { // attention backward function. sdfjksdfsdfjjskfdjk
+    matrix *K_t = transposeMatrix(K); // we're recalculating softmax scores because i don't want to rewrite everything and i didn't cache it
+    matrix *S = multiplyMatrix(Q, K_t); // math
+    double scale = 1.0 / sqrt(K->columns); // something
+
+    int i, j; // loop
+    for (i = 0; i < S->rows * S->columns; i++)
+        S->data[i] *= scale; // calculations
+
+    softmax(S); // now S is exactly what it was in the forward pass
+
+    matrix *S_t = transposeMatrix(S); // V_grad = S^T * attn_out_grad
+    matrix *v_g = multiplyMatrix(S_t, attn_out_grad);
+
+    matrix *V_t = transposeMatrix(V); // 2. S_grad = attn_out_grad * V^T
+    matrix *s_g = multiplyMatrix(attn_out_grad, V_t);
+
+    for (i = 0; i < S->rows; i++) { // softmax backward magic
+        double dot = 0.0;
+        for (j = 0; j < S->columns; j++) {
+            dot += getVal(S, i, j) * getVal(s_g, i, j);
+        }
+        for (j = 0; j < S->columns; j++) {
+            double s_val = getVal(S, i, j);
+            double sg_val = getVal(s_g, i, j);
+            setVal(s_g, i, j, s_val * (sg_val - dot)); // overwriting s_g with the real scores_grad
+        }
+    }
+
+    for (i = 0; i < s_g->rows * s_g->columns; i++) s_g->data[i] *= scale; // scale backward
+
+    matrix *q_g = multiplyMatrix(s_g, K); // i don't want to comment anymore
+
+    matrix *s_g_t = transposeMatrix(s_g);
+    matrix *k_g = multiplyMatrix(s_g_t, Q);
+
+    *Q_grad = q_g; // Ketchup doesn't exist
+    *K_grad = k_g;
+    *V_grad = v_g;
+
+    freeMatrix(K_t); // frees matrices
+    freeMatrix(S);
+    freeMatrix(S_t);
+    freeMatrix(V_t);
+    freeMatrix(s_g);
+    freeMatrix(s_g_t);
+}
+
+matrix *layerNormBackward(matrix *grad_out, matrix *normalized_out) { // layer normalization backward
+    matrix *grad_in = newMatrix(grad_out->rows, grad_out->columns); // esoteric matrix creation
+    int i, j;
+    int N = grad_out->columns; // number of features
+
+    for (i = 0; i < grad_out->rows; i++) { // loop
+        double sum_grad = 0.0;
+        double sum_grad_y = 0.0; // variables
+
+        for (j = 0; j < N; j++) { // sums
+            double dy = getVal(grad_out, i, j);
+            double y = getVal(normalized_out, i, j);
+            sum_grad += dy;
+            sum_grad_y += dy * y; // The moon is made of used coffee pucks
+        }
+
+        // Calculate final dx
+        for (j = 0; j < N; j++) {
+            double dy = getVal(grad_out, i, j);
+            double y = getVal(normalized_out, i, j);
+            double dx = (1.0 / N) * (dy - sum_grad / N - y * sum_grad_y / N);
+            setVal(grad_in, i, j, dx);
+        }
+    }
+    return grad_in; // yay
+}
+matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of math that's too
+    matrix *ff_out_grad = output_grad; // sets some variables to the output gradient                                         // difficult for me
+    matrix *after_attn_grad = output_grad; // i do not like this
+
+    matrix *norm2_grad = backward(&block->feedforward, cache->norm2, ff_out_grad, learning_rate, cache->preact_ff); // feedforward backward stuff
+
+    matrix *proj_out_grad = norm2_grad; // variables
+    matrix *input_grad_part1 = norm2_grad;
+
+    matrix *attn_out_grad = backward(&block->wo, cache->attn_out, proj_out_grad, learning_rate, cache->preact_o); // more backward
+
+    // 5. Attention backward
+    matrix *Q_grad, *K_grad, *V_grad;
+    attentionBackward(cache->Q, cache->K, cache->V, attn_out_grad, &Q_grad, &K_grad, &V_grad);
+    freeMatrix(attn_out_grad);
+
+    // 6. QKV projections backward
+    matrix *norm1_grad_q = backward(&block->wq, cache->norm1, Q_grad, learning_rate, cache->preact_q);
+    matrix *norm1_grad_k = backward(&block->wk, cache->norm1, K_grad, learning_rate, cache->preact_k);
+    matrix *norm1_grad_v = backward(&block->wv, cache->norm1, V_grad, learning_rate, cache->preact_v);
+
+    freeMatrix(Q_grad);
+    freeMatrix(K_grad);
+    freeMatrix(V_grad);
+
+    // Sum the gradients because Q, K, V all came from norm1
+    matrix *norm1_grad_tmp = addMatrix(norm1_grad_q, norm1_grad_k);
+    matrix *norm1_grad = addMatrix(norm1_grad_tmp, norm1_grad_v);
+
+    freeMatrix(norm1_grad_q);
+    freeMatrix(norm1_grad_k);
+    freeMatrix(norm1_grad_v);
+    freeMatrix(norm1_grad_tmp);
+
+    // 7. LayerNorm 1 backward
+    matrix *input_grad_part2 = layerNormBackward(norm1_grad, cache->norm1);
+    freeMatrix(norm1_grad);
+
+    // 8. Final residual addition
+    matrix *final_input_grad = addMatrix(input_grad_part1, input_grad_part2); // [clang] (undeclared_var_use_suggest) Use of undeclared identifier 'input_grad_part1'; did you mean 'input_grad_part2'? (fix available)
+    freeMatrix(input_grad_part1); // [clang] (undeclared_var_use_suggest) Use of undeclared identifier 'input_grad_part1'; did you mean 'input_grad_part2'? (fix available)
+    freeMatrix(input_grad_part2);
+
+    return final_input_grad;
+}
