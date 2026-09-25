@@ -101,6 +101,10 @@ matrix *multiplyMatrix(matrix *a, matrix *b) { // takes two matrices
     return result; // returns the result
 }
 
+double linear(double x) { // linear activation, literally does nothing
+    return x; // does nothing
+}
+
 double relu(double x) { // makes a function
     if (x < 0) return 0; // If x is less than 0, return 0
     return x; // return x
@@ -148,6 +152,10 @@ double mse(matrix *predicted, matrix *actual) { // takes two matrices
     return sum / (predicted->rows * predicted->columns); // returns
 }
 
+double linear_derivative(double x) { // linear derivative, literally just returns 1
+    return 1.0; // the derivative of x is always 1
+}
+
 double relu_derivative(double x) { // relu but derivative :thumbsup:
     return x > 0 ? 1.0 : 0.0; // math.
 }
@@ -158,6 +166,7 @@ double sigmoid_derivative(double x) { // sigmoid but derivative
 }
 
 double activation_derivative(double (*func)(double), double x) { // absolutely, yes, of course
+    if (func == linear) return linear_derivative(x); // ADD THIS
     if (func == relu) return relu_derivative(x);
     if (func == sigmoid) return sigmoid_derivative(x);
     return 0;
@@ -506,12 +515,12 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
         block->wo.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
     }
 
-    block->feedforward.weights = newMatrix(input_size, hidden_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
-    block->feedforward.biases = newMatrix(1, hidden_size); // sets the biases to a matrix of 1 row and hidden_size columns
+    block->feedforward.weights = newMatrix(input_size, input_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
+    block->feedforward.biases = newMatrix(1, input_size); // sets the biases to a matrix of 1 row and input_size columns
     block->feedforward.activation = activation; // sets the activation to activation
 
-    for (i = 0; i < input_size * hidden_size; i++) // for loop
-        block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the  weights randomly
+    for (i = 0; i < input_size * input_size; i++) // for loop
+        block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the weights randomly
 
     return block; // returns the meaning of life
 }
@@ -830,8 +839,8 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(norm1_grad);
 
     // 8. Final residual addition
-    matrix *final_input_grad = addMatrix(input_grad_part1, input_grad_part2); // [clang] (undeclared_var_use_suggest) Use of undeclared identifier 'input_grad_part1'; did you mean 'input_grad_part2'? (fix available)
-    freeMatrix(input_grad_part1); // [clang] (undeclared_var_use_suggest) Use of undeclared identifier 'input_grad_part1'; did you mean 'input_grad_part2'? (fix available)
+    matrix *final_input_grad = addMatrix(input_grad_part1, input_grad_part2);
+    freeMatrix(input_grad_part1);
     freeMatrix(input_grad_part2);
 
     return final_input_grad;
