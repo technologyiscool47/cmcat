@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h> // memset
 
-#define MAX_VOCAB 10000 // max vocab token size
+#define MAX_VOCAB 2000 // max vocab token size
 
 /* ------------------ *\
    | Byte Level BPE |
@@ -38,8 +38,8 @@ void countPairs(int *tokens, long size, int counts[MAX_VOCAB][MAX_VOCAB]){ // co
 
 void findMostCommonPair(int counts[MAX_VOCAB][MAX_VOCAB], int *best_a, int *best_b){ // finds the most common pair
     int max_count = 0, i, j; // variables
-    for (i = 0; i < 256; i++){ // loops through i and j
-        for (j = 0; j < 256; j++){
+    for (i = 0; i < MAX_VOCAB; i++){ // loops through i and j
+        for (j = 0; j < MAX_VOCAB; j++){
             if (counts[i][j] > max_count){ // is it the most common pair?
                 max_count = counts[i][j]; // update the max count
                 *best_a = i; *best_b = j; // update the most common a and b
@@ -63,7 +63,7 @@ int *mergePair(int *tokens, long size, int pair_a, int pair_b, int new_token_id,
     *new_size = j; // sets new size to j
     return new_tokens; // returns the New and Merged pairs
 }
-void trainBPE(const char *filename, int target_vocab_size) { // BPE train functiom
+void trainBPE(const char *filename, int target_vocab_size, int *merges_a, int *merges_b, int *num_merges) { // BPE train functiom
     if (target_vocab_size > MAX_VOCAB) { // error
         printf("misc.c error: target_vocab_size is too large!\n");
         return;
@@ -81,7 +81,8 @@ void trainBPE(const char *filename, int target_vocab_size) { // BPE train functi
     free(bytes); // free the bytes
     long current_size = file_size;
 
-    for (int vocab_size = 256; vocab_size < target_vocab_size; vocab_size++) { // BPE Training Loop
+    int vocab_size = 256;
+    for (; vocab_size < target_vocab_size; vocab_size++) { // BPE Training Loop
         static int counts[MAX_VOCAB][MAX_VOCAB]; // use static so it goes on the heap instead of the stack (avoids [[PROGRAMMING HELP WEBSITE UNFORTUNATLY REPLACED BY AI]])
         memset(counts, 0, sizeof(counts)); // zero out the counts array
 
@@ -96,6 +97,8 @@ void trainBPE(const char *filename, int target_vocab_size) { // BPE train functi
         }
 
         printf("Merging %d and %d into %d (count: %d)\n", best_a, best_b, vocab_size, counts[best_a][best_b]);
+        merges_a[vocab_size - 256] = best_a;
+        merges_b[vocab_size - 256] = best_b;
 
         long new_size;
         int *new_tokens = mergePair(current_tokens, current_size, best_a, best_b, vocab_size, &new_size); // merge
@@ -106,4 +109,52 @@ void trainBPE(const char *filename, int target_vocab_size) { // BPE train functi
     }
 
     free(current_tokens); // free final tokens
+    *num_merges = vocab_size - 256;
+}
+
+void saveBPE(const char *filename, int *merges_a, int *merges_b, int num_merges){ // save tokenizer function
+    FILE *f = fopen(filename, "wb"); // opens a New File(TM)
+    if (f == NULL) { // error
+        printf("misc.c error: saveBPE was given a NULL file\n");
+        return;
+    }
+    fwrite(&num_merges, sizeof(int), 1, f); // writes
+    fwrite(merges_a, sizeof(int), num_merges, f);
+    fwrite(merges_b, sizeof(int), num_merges, f);
+    fclose(f); // closes the file
+}
+
+void loadBPE(const char *filename, int *merges_a, int *merges_b, int *num_merges){
+    FILE *f = fopen(filename, "rb"); // opens the BPE file
+    if (f == NULL) { // error
+        printf("misc.c error: loadBPE was given a NULL file\n");
+        return;
+    }
+    fread(num_merges, sizeof(int), 1, f); // reads
+    fread(merges_a, sizeof(int), *num_merges, f);
+    fread(merges_b, sizeof(int), *num_merges, f);
+    fclose(f); // closes the file
+}
+
+int *tokenize(const char *text, long *out_size, int *merges_a, int *merges_b, int num_merges){ // tokenize
+    long text_length = strlen(text); // text length
+    int *current_tokens = (int*) malloc(text_length * sizeof(int)); // Allocates current tokens array
+
+    for (int i = 0; i < text_length; i++) { // loops through the text
+        current_tokens[i] = (unsigned char)text[i]; // puts current tokens in array
+    }
+
+    long current_size = text_length; // set the current size to the text length
+
+    for (int i = 0; i < num_merges; i++){ // loop through merges
+        long new_size; // im so sleepy
+        int *new_tokens = mergePair(current_tokens, current_size, merges_a[i], merges_b[i], 256 + i, &new_size); // merges
+
+        free(current_tokens); // free the tokens
+
+        current_tokens = new_tokens; // sets current tokens to new tokens
+        current_size = new_size; // sets current size to new size
+        *out_size = current_size; // sets out size to current size
+    }
+    return current_tokens; // returns the tokens
 }
