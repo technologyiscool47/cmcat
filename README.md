@@ -10,7 +10,7 @@ I named it cmcat because i recently saw [a wikipedia article about the Chinese M
 
 ### Completeness
 
-This is not complete (yet). Do not expect this to work well. Do not expect it to work.
+This is not complete. Check back in a few years to see a working LLM. Right now its 600 lines of linear algebra and a BPE tokenizer
 
 ### Goal
 
