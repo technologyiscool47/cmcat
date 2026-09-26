@@ -14,7 +14,7 @@ This is not complete. Check back in a few years to see a working LLM. Right now 
 
 ### Goal
 
-i want to have a local llm i can run on my pc <sup>(Intel Xeon E5-2620 v3 @ 2.40GHz and NVIDIA GeForce GTX 1050 w/ 2GB VRAM)</sup> and be happy with the speed and intelligence.
+i want to have a local llm i can run on my pc <sup>(Intel Xeon E5-2667 v4 @ 2.40GHz and NVIDIA GeForce GTX 1050 w/ 2GB VRAM)</sup> and be happy with the speed and intelligence.
 
 There have been many tiny little breakthroughs in the world of LLMs over the years, like BitNet b1.58 or literally everything in Deepseek v4 or [colibrì](https://github.com/JustVugg/colibri). I wanted to, first of all, make my own LLM (for cool points) and second of all, combine everything i find into one and make my project very fast.
 
