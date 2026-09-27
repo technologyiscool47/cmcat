@@ -1,11 +1,18 @@
 #include "cmai.c"
+#include "misc.c"
 
-int main(){ // main training loop. as of now train.c is mostly a test, it isnt what i want it to be yet. wait patiently until i finish my Break(TM)
-    int vocab_size = 10, d_model = 16, num_blocks = 2, hidden_size = 64, seq_len = 4, stops = 1000; // training variables and parameters
+int main(){ // main training loop. as of now train.c is mostly a test, it isnt what i want it to be yet. wait patiently
+    int merges_a[2000], merges_b[2000]; int num_merges; // tokenization. this sets up the merges
+    trainBPE("LICENSE", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on the license
+    saveBPE("tokenizer.bin", merges_a, merges_b, num_merges);
+
+
+
+    int vocab_size = 256 + num_merges, d_model = 16, num_blocks = 2, hidden_size = 64, seq_len = 4, stops = 1000; // training variables and parameters
     double learning_rate = 0.01; // also a training variable
     srand(47);
 
-    embedding *embed = createEmbedding(vocab_size, d_model); // time to make the model structure
+    embedding *embed = createEmbedding(vocab_size, d_model); // time to make the model structure. no more tokenization for now
     transformer_network *net = createTransformerNetwork(num_blocks, d_model, hidden_size, relu); // this is too, part of the structure
 
     layer unembed;
@@ -18,9 +25,27 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         unembed.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
     }
 
+    long file_size; // tokenization. time to set up bpe
+    unsigned char *text_bytes = readFileToBytes("LICENSE", &file_size); // Read the file to bytes
+
+    long total_tokens;
+    int *text_tokens = tokenize((const char*)text_bytes, &total_tokens, merges_a, merges_b, num_merges); // Tokenize the text!
+    free(text_bytes); // free the bytes because we have tokens
+
+    printf("Total tokens in training data: %ld\n", total_tokens);
+
+    int input_tokens[4];
+    int target_tokens[4];
+
     for (int stop = 0; stop < stops; stop++) { // the main training cycle loop
-        int input_tokens[] = {0, 1, 2, 3}; // data
-        int target_tokens[] = {1, 2, 3, 4}; // what we want the AI to predict based on data
+        // Pick a random starting point in the license
+        int start = rand() % (total_tokens - seq_len - 1);
+
+        // Grab our input sequence and our target sequence (shifted by 1)
+        for (int k = 0; k < seq_len; k++) {
+            input_tokens[k] = text_tokens[start + k];
+            target_tokens[k] = text_tokens[start + k + 1];
+        }
 
         matrix *embed_out = embeddingForward(embed, input_tokens, seq_len); // forward pass
         matrix *pe = positionalEncoding(seq_len, d_model);
@@ -41,7 +66,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
 
         matrix *output_grad = newMatrix(logits->rows, logits->columns); // backprop time. output gradient
         crossEntropyLossGradient(logits, target_tokens, output_grad); // calculate loss
-
+         // fnuyy line nuber
         matrix *unembed_preact = newMatrix(net_out->rows, unembed.weights->columns); // I didn't cache this, but backward() needs it so
         matrix *net_out_grad = backward(&unembed, net_out, output_grad, learning_rate, unembed_preact); // this
         freeMatrix(unembed_preact); // frees matrix :face_holding_back_tears:
@@ -63,7 +88,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         free(caches);
 
         // Free the forward pass matrices
-        freeMatrix(embed_out); // fnuyy line number
+        freeMatrix(embed_out);
         freeMatrix(pe);
         freeMatrix(input_to_net);
         freeMatrix(logits);
