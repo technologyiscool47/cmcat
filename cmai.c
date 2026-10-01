@@ -114,6 +114,35 @@ double sigmoid(double x) { // makes the sigmoid function
     return 1.0 / (1.0 + exp(-x)); // return one difided by the sum of one plus the exponent of negative x
 }
 
+typedef struct { // adam optimizer. sgd (was used previously) is bad so i gotta use this
+    matrix *m; // First moment
+    matrix *v; // Second moment
+    int t;     // Timestep
+} adam_state; // Alias
+
+adam_state *createAdamState(matrix *weights) { // creates an adam state opti,izer thing
+    adam_state *state = malloc(sizeof(adam_state)); // allocates
+    state->m = newMatrix(weights->rows, weights->columns); // creates matrices
+    state->v = newMatrix(weights->rows, weights->columns);
+    state->t = 0; // sets timestep to 0
+    return state; // returns state
+}
+
+void adamUpdate(matrix *weights, matrix *grads, adam_state *state, double lr) { // updates adam
+    state->t++; // increments timestep
+    double beta1 = 0.9, beta2 = 0.999, eps = 1e-8; //  beta 1, beta 2 and epsilon but different
+
+    for (int i = 0; i < weights->rows * weights->columns; i++) { // loop
+        double g = grads->data[i]; // maths that i will not comment on
+        state->m->data[i] = beta1 * state->m->data[i] + (1.0 - beta1) * g;
+        state->v->data[i] = beta2 * state->v->data[i] + (1.0 - beta2) * g * g;
+
+        double m_hat = state->m->data[i] / (1.0 - pow(beta1, state->t));
+        double v_hat = state->v->data[i] / (1.0 - pow(beta2, state->t));
+
+        weights->data[i] -= lr * m_hat / (sqrt(v_hat) + eps);
+    }
+}
 
 /* --------------------------------------------- *\
    | Layers and other stuff on top of matrices |
@@ -126,6 +155,8 @@ typedef struct { // New struct!!! yay
     matrix *weights; // weights matrix
     matrix *biases; // biases matrix
     double (*activation)(double); // pointer to an activation function
+    adam_state *weight_adam; // adam weights and biases
+    adam_state *bias_adam;
 } layer; // asdlkasdlkj
 
 matrix *forward(layer *l, matrix *input, matrix *preact_out) { // i HATE forward passes
@@ -172,6 +203,26 @@ double activation_derivative(double (*func)(double), double x) { // absolutely, 
     return 0;
 }
 
+void clipGradients(matrix *m, double max_norm) { // gradient clipping to stop them from exploding // used to be right after transformerBackward but i have to use this in backward so the definition must be before backward
+    double total_norm = 0.0;
+    int i;
+
+    for (i = 0; i < m->rows * m->columns; i++) { // hklsfzhkfgzyl
+        if (isnan(m->data[i]) || isinf(m->data[i])) { // if we encounter infinity or a nan, reset gradient to 0
+            for (i = 0; i < m->rows * m->columns; i++) m->data[i] = 0.0;
+            return;
+        }
+        total_norm += m->data[i] * m->data[i];
+    }
+    total_norm = sqrt(total_norm);
+
+    if (total_norm > max_norm) { // if it's too big, shrink the damn gradients
+        double scale = max_norm / total_norm;
+        for (i = 0; i < m->rows * m->columns; i++) {
+            m->data[i] *= scale;
+        }
+    }
+}
 
 matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_rate, matrix *preact) { // i copy pasted this. sue me. i kinda understand it but at the same time i dont.
     // output_grad is the gradient from the loss function                                              // backprop is hard.
@@ -195,23 +246,19 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
     matrix *weight_grad = multiplyMatrix(input_t, activation_grad); // computes weight gradients
 
     // update weights
-    for (i = 0; i < l->weights->rows; i++) { // updates weights
-        for (j = 0; j < l->weights->columns; j++) {
-            double w = getVal(l->weights, i, j);
-            double grad = getVal(weight_grad, i, j);
-            setVal(l->weights, i, j, w - learning_rate * grad); // sets values
-        }
-    }
+    adamUpdate(l->weights, weight_grad, l->weight_adam, learning_rate);
 
-    // update biases (sum each column of activation_grad)
-    for (j = 0; j < activation_grad->columns; j++) { // updates biases
-        double bias_grad = 0;
+    // Update biases
+    matrix *bias_grad = newMatrix(1, activation_grad->columns); // (we need a temporary matrix for the bias gradient)
+    for (j = 0; j < activation_grad->columns; j++) {
+        double bg = 0;
         for (i = 0; i < activation_grad->rows; i++) {
-            bias_grad += getVal(activation_grad, i, j); // magic
+            bg += getVal(activation_grad, i, j);
         }
-        double b = getVal(l->biases, 0, j);
-        setVal(l->biases, 0, j, b - learning_rate * bias_grad); // sets values
+        setVal(bias_grad, 0, j, bg);
     }
+    adamUpdate(l->biases, bias_grad, l->bias_adam, learning_rate); // updates
+    freeMatrix(bias_grad); // frees
 
     // compute input gradient: activation_grad * weights^T
     matrix *weights_t = transposeMatrix(l->weights);
@@ -423,9 +470,17 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // super impo
     matrix *keys_t = transposeMatrix(keys); // transpose keys
     matrix *scores = multiplyMatrix(queries, keys_t); // scores = queries * keys^T how much does each query match each key?
 
-
     double scale = 1.0 / sqrt(keys->columns); // scale by sqrt(key_dimension), also because everybody does it
-    int i; // interestingly unknown declaration, please tell me what this means
+    int i, j; // interestingly unknown declaration, please tell me what this means
+
+    for (i = 0; i < scores->rows; i++) { // If row i is looking at column j, and j > i, it's in the future, -10000 so softmax makes it 0. this is callled a casual mask
+        for (j = 0; j < scores->columns; j++) {
+            if (j > i) {
+                setVal(scores, i, j, -10000.0);
+            }
+        }
+    }
+
     for (i = 0; i < scores->rows * scores->columns; i++) // looplooplooploop
         scores->data[i] *= scale; // multiplies scores data[i] by the
 
@@ -493,31 +548,48 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
 
     block->wq.weights = newMatrix(input_size, input_size); // projection layer time. this is all just initialization, i wont comment on it
     block->wq.biases = newMatrix(1, input_size);
-    block->wq.activation = relu; // projections usually use relu so we'll use that
+    block->wq.activation = linear; // projections usually use relu so we'll use that // EDIT: No they do not, im stupid and the models loss very rarely drops below 5 with relu
     block->wk.weights = newMatrix(input_size, input_size);
     block->wk.biases = newMatrix(1, input_size);
-    block->wk.activation = relu;
+    block->wk.activation = linear;
 
     block->wv.weights = newMatrix(input_size, input_size);
     block->wv.biases = newMatrix(1, input_size);
-    block->wv.activation = relu;
+    block->wv.activation = linear;
 
     block->wo.weights = newMatrix(input_size, input_size);
     block->wo.biases = newMatrix(1, input_size);
-    block->wo.activation = relu;
+    block->wo.activation = linear;
+
+    block->wq.weight_adam = createAdamState(block->wq.weights); // adam state stuffs
+    block->wq.bias_adam = createAdamState(block->wq.biases);
+
+    block->wk.weight_adam = createAdamState(block->wk.weights);
+    block->wk.bias_adam = createAdamState(block->wk.biases);
+
+    block->wv.weight_adam = createAdamState(block->wv.weights);
+    block->wv.bias_adam = createAdamState(block->wv.biases);
+
+    block->wo.weight_adam = createAdamState(block->wo.weights);
+    block->wo.bias_adam = createAdamState(block->wo.biases);
 
     // Randomize the projection weights
+    double scale = 1.0 / sqrt(input_size);
+
     int i;
     for (i = 0; i < input_size * input_size; i++) {
-        block->wq.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
-        block->wk.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
-        block->wv.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
-        block->wo.weights->data[i] = (rand() % 100) / 100.0 - 0.5;
+        block->wq.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
+        block->wk.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
+        block->wv.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
+        block->wo.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
     }
 
     block->feedforward.weights = newMatrix(input_size, input_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
     block->feedforward.biases = newMatrix(1, input_size); // sets the biases to a matrix of 1 row and input_size columns
     block->feedforward.activation = activation; // sets the activation to activation
+
+    block->feedforward.weight_adam = createAdamState(block->feedforward.weights); // more adam
+    block->feedforward.bias_adam = createAdamState(block->feedforward.biases);
 
     for (i = 0; i < input_size * input_size; i++) // for loop
         block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the weights randomly
@@ -579,6 +651,7 @@ typedef struct { // embedding struct
     matrix *weights; // giant lookup table for the embeddings
     int vocab_size; // vocab size
     int embedding_dim; // embedding dimensions
+    adam_state *weight_adam; // adammmmm
 } embedding; // alias
 
 embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function, makes an embedding, takes vocab size and the dimensions :thumbsup:
@@ -589,9 +662,13 @@ embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function,
     e->embedding_dim = embedding_dim; // sets embedding dimensions
     e->weights = newMatrix(vocab_size, embedding_dim); // sets weights
 
+    e->weight_adam = createAdamState(e->weights);
+
+    double scale = 1.0 / sqrt(embedding_dim);
+
     int i; // i
     for (i = 0; i < vocab_size * embedding_dim; i++) { // for loop
-        e->weights->data[i] = (rand() % 100) / 100.0 - 0.5; // randomizes dimensions
+        e->weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale; // randomizes dimensions
     }
 
     return e; // returns e
@@ -696,18 +773,18 @@ matrix *transformerNetworkForward(matrix *input, transformer_network *net, trans
     return current; // returns current
 }
 
-double crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entropy loss, the type of loss they use in llms. takes a matrix of predictions and the target tokens
-    double loss = 0; // creates the loss variable
-    int i; // i
+double crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entropy loss. turns out the last one was incorrect or something idek im so tired
+    double loss = 0;
+    int i;
 
-    for (i = 0; i < predicted->rows; i++) { //loops
-        int target = target_tokens[i]; // target variable
-        double prob = getVal(predicted, i, target); // probability variable
-        loss += -log(prob + LN_EPSILON); // negative log of probability. punishes ai heavily if it confidently says the wrong thing. adds epsilon because -log of 0 is infinity
+    for (i = 0; i < predicted->rows; i++) { // math
+        int target = target_tokens[i];
+        double prob = getVal(predicted, i, target);
+        loss += -log(prob + LN_EPSILON); // actual loss calculation
     }
 
-    loss = loss/predicted->rows; // divides loss to get average
-    return loss; // returns
+    loss = loss / predicted->rows; // Average loss over all predictions
+    return loss; //returns
 }
 
 void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *output_grad) { // cross entropy loss gradient thing. basically, when training, you have to use a combination of the loss
@@ -719,9 +796,9 @@ void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *out
             double prob = getVal(predicted, i, j); // probablility
 
             if (j == target) // if ai got it right
-                setVal(output_grad, i, j, prob - 1.0); // nudge it towards more confidence
+                setVal(output_grad, i, j, (prob - 1.0) / predicted->rows); // nudge it towards more confidence
             else // else
-                setVal(output_grad, i, j, prob - 0.0); // nudge it towards the right answer
+                setVal(output_grad, i, j, (prob - 0.0) / predicted->rows); // nudge it towards the right answer
         }
     }
 }
@@ -800,24 +877,24 @@ matrix *layerNormBackward(matrix *grad_out, matrix *normalized_out) { // layer n
     }
     return grad_in; // yay
 }
-matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of math that's too
-    matrix *ff_out_grad = output_grad; // sets some variables to the output gradient                                         // difficult for me
-    matrix *after_attn_grad = output_grad; // i do not like this
+matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of math that's super esoteric
+    matrix *ff_out_grad = output_grad;// feedforward backward pass
+    matrix *norm2_out_grad = backward(&block->feedforward, cache->norm2, ff_out_grad, learning_rate, cache->preact_ff);
 
-    matrix *norm2_grad = backward(&block->feedforward, cache->norm2, ff_out_grad, learning_rate, cache->preact_ff); // feedforward backward stuff
+    matrix *after_attn_grad_from_ff = layerNormBackward(norm2_out_grad, cache->norm2); // i forgot the goddamn layernorm backward, so here it is
+    freeMatrix(norm2_out_grad); // Free the intermediate gradient
 
-    matrix *proj_out_grad = norm2_grad; // variables
-    matrix *input_grad_part1 = norm2_grad;
+    matrix *after_attn_grad = addMatrix(output_grad, after_attn_grad_from_ff); // "residual split" for after attn
+    freeMatrix(after_attn_grad_from_ff);
 
-    matrix *attn_out_grad = backward(&block->wo, cache->attn_out, proj_out_grad, learning_rate, cache->preact_o); // more backward
+    matrix *proj_out_grad = after_attn_grad; // wo backward
+    matrix *attn_out_grad = backward(&block->wo, cache->attn_out, proj_out_grad, learning_rate, cache->preact_o);
 
-    // 5. Attention backward
-    matrix *Q_grad, *K_grad, *V_grad;
+    matrix *Q_grad, *K_grad, *V_grad; // Attention backward
     attentionBackward(cache->Q, cache->K, cache->V, attn_out_grad, &Q_grad, &K_grad, &V_grad);
     freeMatrix(attn_out_grad);
 
-    // 6. QKV projections backward
-    matrix *norm1_grad_q = backward(&block->wq, cache->norm1, Q_grad, learning_rate, cache->preact_q);
+    matrix *norm1_grad_q = backward(&block->wq, cache->norm1, Q_grad, learning_rate, cache->preact_q);// projections backward
     matrix *norm1_grad_k = backward(&block->wk, cache->norm1, K_grad, learning_rate, cache->preact_k);
     matrix *norm1_grad_v = backward(&block->wv, cache->norm1, V_grad, learning_rate, cache->preact_v);
 
@@ -825,8 +902,7 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(K_grad);
     freeMatrix(V_grad);
 
-    // Sum the gradients because Q, K, V all came from norm1
-    matrix *norm1_grad_tmp = addMatrix(norm1_grad_q, norm1_grad_k);
+    matrix *norm1_grad_tmp = addMatrix(norm1_grad_q, norm1_grad_k); // Sum the gradients because Q, K, V all came from norm1
     matrix *norm1_grad = addMatrix(norm1_grad_tmp, norm1_grad_v);
 
     freeMatrix(norm1_grad_q);
@@ -834,13 +910,12 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(norm1_grad_v);
     freeMatrix(norm1_grad_tmp);
 
-    // 7. LayerNorm 1 backward
-    matrix *input_grad_part2 = layerNormBackward(norm1_grad, cache->norm1);
+    matrix *input_grad_part2 = layerNormBackward(norm1_grad, cache->norm1); // Layernorm1 backward
     freeMatrix(norm1_grad);
 
-    // 8. Final residual addition
-    matrix *final_input_grad = addMatrix(input_grad_part1, input_grad_part2);
-    freeMatrix(input_grad_part1);
+    matrix *final_input_grad = addMatrix(after_attn_grad, input_grad_part2); // final residual addition
+
+    freeMatrix(after_attn_grad); // Free me from this hell
     freeMatrix(input_grad_part2);
 
     return final_input_grad;

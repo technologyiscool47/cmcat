@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // memset
+#include "cmai.c"
 
 #define MAX_VOCAB 2000 // max vocab token size
 
@@ -157,4 +158,85 @@ int *tokenize(const char *text, long *out_size, int *merges_a, int *merges_b, in
         *out_size = current_size; // sets out size to current size
     }
     return current_tokens; // returns the tokens
+}
+
+void expandToken(int token_id, int *merges_a, int *merges_b, int num_merges, unsigned char *buffer, int *buf_idx) { // expands token id into original bytes
+    if (token_id < 256) { // raw byte, just add it to the buffer
+        buffer[(*buf_idx)++] = (unsigned char)token_id;
+        return;
+    }
+
+    int merge_idx = token_id - 256; //merged token, just split it back into its two parents
+    if (merge_idx < num_merges) {
+        expandToken(merges_a[merge_idx], merges_a, merges_b, num_merges, buffer, buf_idx);
+        expandToken(merges_b[merge_idx], merges_a, merges_b, num_merges, buffer, buf_idx);
+    }
+}
+
+/* ------- *\
+   | I/O |
+\* ------- */
+
+void saveTransformerModel(const char *filename, embedding *embed, transformer_network *net, layer *unembed){ // saving transformer model function
+    FILE *f = fopen(filename, "wb"); // opens file
+    if (f == NULL) { // error
+        printf("misc.c error: Couldn't open file in saveTransformerModel\n");
+        return;
+    }
+
+    fwrite(embed->weights->data, sizeof(double), embed->weights->rows * embed->weights->columns, f); // writes embed weights
+
+    fwrite(unembed->weights->data, sizeof(double), unembed->weights->rows * unembed->weights->columns, f); // writes unembed weights and biases
+    fwrite(unembed->biases->data, sizeof(double), unembed->biases->rows * unembed->biases->columns, f);
+
+    for (int i = 0; i < net->num_blocks; i++) {
+        fwrite(net->blocks[i]->wq.weights->data, sizeof(double), net->blocks[i]->wq.weights->rows * net->blocks[i]->wq.weights->columns, f); // saves wq, wk, wv, wo and feedforward weights and biases
+        fwrite(net->blocks[i]->wq.biases->data, sizeof(double), net->blocks[i]->wq.biases->rows * net->blocks[i]->wq.biases->columns, f);
+
+        fwrite(net->blocks[i]->wk.weights->data, sizeof(double), net->blocks[i]->wk.weights->rows * net->blocks[i]->wk.weights->columns, f);
+        fwrite(net->blocks[i]->wk.biases->data, sizeof(double), net->blocks[i]->wk.biases->rows * net->blocks[i]->wk.biases->columns, f);
+
+        fwrite(net->blocks[i]->wv.weights->data, sizeof(double), net->blocks[i]->wv.weights->rows * net->blocks[i]->wv.weights->columns, f);
+        fwrite(net->blocks[i]->wv.biases->data, sizeof(double), net->blocks[i]->wv.biases->rows * net->blocks[i]->wv.biases->columns, f);
+
+        fwrite(net->blocks[i]->wo.weights->data, sizeof(double), net->blocks[i]->wo.weights->rows * net->blocks[i]->wo.weights->columns, f);
+        fwrite(net->blocks[i]->wo.biases->data, sizeof(double), net->blocks[i]->wo.biases->rows * net->blocks[i]->wo.biases->columns, f);
+
+        fwrite(net->blocks[i]->feedforward.weights->data, sizeof(double), net->blocks[i]->feedforward.weights->rows * net->blocks[i]->feedforward.weights->columns, f);
+        fwrite(net->blocks[i]->feedforward.biases->data, sizeof(double), net->blocks[i]->feedforward.biases->rows * net->blocks[i]->feedforward.biases->columns, f);
+    }
+
+    fclose(f); // closes the file
+}
+
+void loadTransformerModel(const char *filename, embedding *embed, transformer_network *net, layer *unembed){ // loading transformer model function
+    FILE *f = fopen(filename, "rb"); // opens file
+    if (f == NULL) { // error
+        printf("misc.c error: Couldn't open file in loadTransformerModel\n");
+        return;
+    }
+
+    fread(embed->weights->data, sizeof(double), embed->weights->rows * embed->weights->columns, f); // reads embed weights
+
+    fread(unembed->weights->data, sizeof(double), unembed->weights->rows * unembed->weights->columns, f); // reads unembed weights and biases
+    fread(unembed->biases->data, sizeof(double), unembed->biases->rows * unembed->biases->columns, f);
+
+    for (int i = 0; i < net->num_blocks; i++) {
+        fread(net->blocks[i]->wq.weights->data, sizeof(double), net->blocks[i]->wq.weights->rows * net->blocks[i]->wq.weights->columns, f); // reads wq, wk, wv, wo and feedforward weights and biases
+        fread(net->blocks[i]->wq.biases->data, sizeof(double), net->blocks[i]->wq.biases->rows * net->blocks[i]->wq.biases->columns, f);
+
+        fread(net->blocks[i]->wk.weights->data, sizeof(double), net->blocks[i]->wk.weights->rows * net->blocks[i]->wk.weights->columns, f);
+        fread(net->blocks[i]->wk.biases->data, sizeof(double), net->blocks[i]->wk.biases->rows * net->blocks[i]->wk.biases->columns, f);
+
+        fread(net->blocks[i]->wv.weights->data, sizeof(double), net->blocks[i]->wv.weights->rows * net->blocks[i]->wv.weights->columns, f);
+        fread(net->blocks[i]->wv.biases->data, sizeof(double), net->blocks[i]->wv.biases->rows * net->blocks[i]->wv.biases->columns, f);
+
+        fread(net->blocks[i]->wo.weights->data, sizeof(double), net->blocks[i]->wo.weights->rows * net->blocks[i]->wo.weights->columns, f);
+        fread(net->blocks[i]->wo.biases->data, sizeof(double), net->blocks[i]->wo.biases->rows * net->blocks[i]->wo.biases->columns, f);
+
+        fread(net->blocks[i]->feedforward.weights->data, sizeof(double), net->blocks[i]->feedforward.weights->rows * net->blocks[i]->feedforward.weights->columns, f);
+        fread(net->blocks[i]->feedforward.biases->data, sizeof(double), net->blocks[i]->feedforward.biases->rows * net->blocks[i]->feedforward.biases->columns, f);
+    }
+
+    fclose(f); // closes the file
 }
