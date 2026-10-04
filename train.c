@@ -77,6 +77,8 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
             current_grad = next_grad;
         }
 
+        embeddingBackward(embed, input_tokens, seq_len, current_grad, learning_rate); // Backward on embeddings. i forgot to do this
+
         freeMatrix(output_grad); // Free the variables
         freeMatrix(current_grad); // the final gradient from the loop
 

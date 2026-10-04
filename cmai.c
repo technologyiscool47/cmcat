@@ -3,7 +3,9 @@
 #include <math.h> // BOOOORINGGGGGG
 
 #define LN_EPSILON 1e-5 // super small number. is used later on
-
+#define NUM_HEADS 8 // Spiders usually have 4 pairs of eyes, having 8 eyes in total. This line declares 8 heads for multi head attention. Attention heads are like eyes.
+                    // Does that mean that cmcat is a spider? Let's find out! Using advanced analysis, it has become clear that me, technologyiscool47 is scared of
+                    // spiders. However, I am not scared of cmcat which means that spiders and this project are not the same thing.
 
 
 // WARNING: At the time i'm writing this, i am a complete beginner to C. i apologise for the comments
@@ -224,8 +226,8 @@ void clipGradients(matrix *m, double max_norm) { // gradient clipping to stop th
     }
 }
 
-matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_rate, matrix *preact) { // i copy pasted this. sue me. i kinda understand it but at the same time i dont.
-    // output_grad is the gradient from the loss function                                              // backprop is hard.
+matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_rate, matrix *preact) { // backprop is hard.
+    // output_grad is the gradient from the loss function
     // we need to propagate it back and update weights/biases
 
     matrix *activation_grad = newMatrix(output_grad->rows, output_grad->columns); // declaration of independence
@@ -466,31 +468,61 @@ void softmax(matrix *m) { // soft max function. takes a matrix
     }
 }
 
-matrix *attention(matrix *queries, matrix *keys, matrix *values) { // super important. takes queries, keys and values
-    matrix *keys_t = transposeMatrix(keys); // transpose keys
-    matrix *scores = multiplyMatrix(queries, keys_t); // scores = queries * keys^T how much does each query match each key?
+matrix *attention(matrix *queries, matrix *keys, matrix *values) { // Multi-Head attention!
+    int seq_len = queries->rows;
+    int d_model = queries->columns;
+    int head_dim = d_model / NUM_HEADS; // dimensions per head
 
-    double scale = 1.0 / sqrt(keys->columns); // scale by sqrt(key_dimension), also because everybody does it
-    int i, j; // interestingly unknown declaration, please tell me what this means
+    matrix *final_output = newMatrix(seq_len, d_model); // This is where we glue all the heads back together at the end
 
-    for (i = 0; i < scores->rows; i++) { // If row i is looking at column j, and j > i, it's in the future, -10000 so softmax makes it 0. this is callled a casual mask
-        for (j = 0; j < scores->columns; j++) {
-            if (j > i) {
-                setVal(scores, i, j, -10000.0);
+    int h, i, j, k;
+
+    for (h = 0; h < NUM_HEADS; h++) { // process each head independently
+        int offset = h * head_dim; // which 8 columns are we looking at?
+
+        // calculate scores for this head
+        matrix *scores = newMatrix(seq_len, seq_len);
+        double scale = 1.0 / sqrt(head_dim); // Scale by sqrt head dim
+
+        for (i = 0; i < seq_len; i++) {
+            for (j = 0; j < seq_len; j++) {
+                double dot = 0.0;
+                for (k = 0; k < head_dim; k++) {
+                    // Only multiply the [[HEAD DIM]] columns belonging to this head
+                    double q_val = getVal(queries, i, offset + k);
+                    double k_val = getVal(keys, j, offset + k);
+                    dot += q_val * k_val;
+                }
+                setVal(scores, i, j, dot * scale);
             }
         }
+
+        // causal Mask
+        for (i = 0; i < seq_len; i++) {
+            for (j = 0; j < seq_len; j++) {
+                if (j > i) {
+                    setVal(scores, i, j, -10000.0);
+                }
+            }
+        }
+
+        softmax(scores); // softmax over the scores
+
+        // Multiply scores by V_h to get the head's output
+        for (i = 0; i < seq_len; i++) {
+            for (k = 0; k < head_dim; k++) {
+                double val = 0.0;
+                for (j = 0; j < seq_len; j++) {
+                    val += getVal(scores, i, j) * getVal(values, j, offset + k);
+                }
+                setVal(final_output, i, offset + k, val); // Glue heads output into final matrix
+            }
+        }
+
+        freeMatrix(scores);
     }
 
-    for (i = 0; i < scores->rows * scores->columns; i++) // looplooplooploop
-        scores->data[i] *= scale; // multiplies scores data[i] by the
-
-    softmax(scores); // apply softmax to scores
-
-    matrix *output = multiplyMatrix(scores, values); // output = scores * values
-    freeMatrix(keys_t); // free the transposed keys
-    freeMatrix(scores);
-
-    return output; // returns the returning outputtive output
+    return final_output; // returns
 }
 
 typedef struct { // new struct!!!!! we lowkey have to save some values in transformerForward that were previously (if you want to see what i mean, go into a previous commit. we love git) being freed for simplicity
@@ -702,6 +734,26 @@ matrix *embeddingForward(embedding *e, int *token_ids, int seq_len) { // forward
     return out; // returns
 }
 
+void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_grad, double learning_rate) { // embedding backward with ADAM
+    // Create a gradient matrix with the embedding weights size
+    matrix *weight_grad = newMatrix(e->vocab_size, e->embedding_dim); // starts filled with 0s
+
+    int i, j;
+    for (i = 0; i < seq_len; i++) { // Populate the gradients for the tokens that were in sequence
+        int token_id = token_ids[i];
+        if (token_id < 0 || token_id >= e->vocab_size) continue;
+
+        for (j = 0; j < e->embedding_dim; j++) {
+            double grad = getVal(input_grad, i, j);
+            setVal(weight_grad, token_id, j, grad);
+        }
+    }
+
+    adamUpdate(e->weights, weight_grad, e->weight_adam, learning_rate); // Update the embedding weights
+
+    freeMatrix(weight_grad); // free the temporary matrix
+}
+
 matrix *positionalEncoding(int seq_len, int d_model) { // new function. We're doing positional encoding ¡
     matrix *pe = newMatrix(seq_len, d_model); // makes a matrix called pe
     int i, j; // loop cariables
@@ -803,52 +855,100 @@ void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *out
     }
 }
 
-void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, matrix **Q_grad, matrix **K_grad, matrix **V_grad) { // attention backward function. sdfjksdfsdfjjskfdjk
-    matrix *K_t = transposeMatrix(K); // we're recalculating softmax scores because i don't want to rewrite everything and i didn't cache it
-    matrix *S = multiplyMatrix(Q, K_t); // math
-    double scale = 1.0 / sqrt(K->columns); // something
+void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, matrix **Q_grad, matrix **K_grad, matrix **V_grad) { // backward for attention. rewritten because multi head
+    int seq_len = Q->rows; // sets up variables
+    int d_model = Q->columns;
+    int head_dim = d_model / NUM_HEADS;
 
-    int i, j; // loop
-    for (i = 0; i < S->rows * S->columns; i++)
-        S->data[i] *= scale; // calculations
+    matrix *q_g = newMatrix(seq_len, d_model); // sets up gradients
+    matrix *k_g = newMatrix(seq_len, d_model);
+    matrix *v_g = newMatrix(seq_len, d_model);
 
-    softmax(S); // now S is exactly what it was in the forward pass
+    int h, i, j, k;
 
-    matrix *S_t = transposeMatrix(S); // V_grad = S^T * attn_out_grad
-    matrix *v_g = multiplyMatrix(S_t, attn_out_grad);
+    for (h = 0; h < NUM_HEADS; h++) {
+        int offset = h * head_dim;
 
-    matrix *V_t = transposeMatrix(V); // 2. S_grad = attn_out_grad * V^T
-    matrix *s_g = multiplyMatrix(attn_out_grad, V_t);
-
-    for (i = 0; i < S->rows; i++) { // softmax backward magic
-        double dot = 0.0;
-        for (j = 0; j < S->columns; j++) {
-            dot += getVal(S, i, j) * getVal(s_g, i, j);
+        // Recalculate softmax scores for this head
+        matrix *S = newMatrix(seq_len, seq_len);
+        double scale = 1.0 / sqrt(head_dim);
+        for (i = 0; i < seq_len; i++) {
+            for (j = 0; j < seq_len; j++) {
+                double dot = 0.0;
+                for (k = 0; k < head_dim; k++) {
+                    dot += getVal(Q, i, offset + k) * getVal(K, j, offset + k);
+                }
+                setVal(S, i, j, dot * scale);
+            }
         }
-        for (j = 0; j < S->columns; j++) {
-            double s_val = getVal(S, i, j);
-            double sg_val = getVal(s_g, i, j);
-            setVal(s_g, i, j, s_val * (sg_val - dot)); // overwriting s_g with the real scores_grad
+        // Apply causal mask
+        for (i = 0; i < seq_len; i++) {
+            for (j = 0; j < seq_len; j++) {
+                if (j > i) setVal(S, i, j, -10000.0);
+            }
         }
+        softmax(S);
+
+        // V_grad for this head
+        for (i = 0; i < seq_len; i++) {
+            for (k = 0; k < head_dim; k++) {
+                double val = 0.0;
+                for (j = 0; j < seq_len; j++) {
+                    val += getVal(S, j, i) * getVal(attn_out_grad, j, offset + k);
+                }
+                setVal(v_g, i, offset + k, val);
+            }
+        }
+
+        // S_grad
+        matrix *s_g = newMatrix(seq_len, seq_len);
+        for (i = 0; i < seq_len; i++) {
+            for (j = 0; j < seq_len; j++) {
+                double val = 0.0;
+                for (k = 0; k < head_dim; k++) {
+                    val += getVal(attn_out_grad, i, offset + k) * getVal(V, j, offset + k);
+                }
+                setVal(s_g, i, j, val);
+            }
+        }
+
+        // Softmax backward
+        for (i = 0; i < seq_len; i++) {
+            double dot = 0.0;
+            for (j = 0; j < seq_len; j++) {
+                dot += getVal(S, i, j) * getVal(s_g, i, j);
+            }
+            for (j = 0; j < seq_len; j++) {
+                double s_val = getVal(S, i, j);
+                double sg_val = getVal(s_g, i, j);
+                setVal(s_g, i, j, s_val * (sg_val - dot));
+            }
+        }
+
+        // Scale backward
+        for (i = 0; i < seq_len * seq_len; i++) s_g->data[i] *= scale;
+
+        // Q_grad and K_grad
+        for (i = 0; i < seq_len; i++) {
+            for (k = 0; k < head_dim; k++) {
+                double q_val = 0.0;
+                double k_val = 0.0;
+                for (j = 0; j < seq_len; j++) {
+                    q_val += getVal(s_g, i, j) * getVal(K, j, offset + k);
+                    k_val += getVal(s_g, j, i) * getVal(Q, i, offset + k);
+                }
+                setVal(q_g, i, offset + k, q_val);
+                setVal(k_g, i, offset + k, k_val);
+            }
+        }
+
+        freeMatrix(S); // frees
+        freeMatrix(s_g);
     }
 
-    for (i = 0; i < s_g->rows * s_g->columns; i++) s_g->data[i] *= scale; // scale backward
-
-    matrix *q_g = multiplyMatrix(s_g, K); // i don't want to comment anymore
-
-    matrix *s_g_t = transposeMatrix(s_g);
-    matrix *k_g = multiplyMatrix(s_g_t, Q);
-
-    *Q_grad = q_g; // Ketchup doesn't exist
+    *Q_grad = q_g; // sets the gradients
     *K_grad = k_g;
     *V_grad = v_g;
-
-    freeMatrix(K_t); // frees matrices
-    freeMatrix(S);
-    freeMatrix(S_t);
-    freeMatrix(V_t);
-    freeMatrix(s_g);
-    freeMatrix(s_g_t);
 }
 
 matrix *layerNormBackward(matrix *grad_out, matrix *normalized_out) { // layer normalization backward
