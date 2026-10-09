@@ -1,6 +1,7 @@
 #include <stdio.h> // From the ashes of fallen kingdoms, the First Dragon forged the Runes of C. We are but mortals wielding their power. Now speak your incantations and see what stirs.
 #include <stdlib.h> // same but for stdlib.h
 #include <math.h> // BOOOORINGGGGGG
+#include <stdint.h> // for bitnet optimizations
 
 #define LN_EPSILON 1e-5 // super small number. is used later on
 #define NUM_HEADS 8 // Spiders usually have 4 pairs of eyes, having 8 eyes in total. This line declares 8 heads for multi head attention. Attention heads are like eyes.
@@ -9,6 +10,7 @@
 
 
 // WARNING: At the time i'm writing this, i am a complete beginner to C. i apologise for the comments
+
 
 
 
@@ -116,6 +118,49 @@ double sigmoid(double x) { // makes the sigmoid function
     return 1.0 / (1.0 + exp(-x)); // return one difided by the sum of one plus the exponent of negative x
 }
 
+int get2BitValue(double weight, double threshold) { // Maps a ternary value to a 2 bit binary value
+    if (weight > threshold) return 2;  // 1  -> 10
+    if (weight < -threshold) return 0; // -1 -> 00
+    return 1;                          // 0  -> 01
+}
+
+void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, double *scale) {
+    int total_weights = float_weights->rows * float_weights->columns;
+
+
+    double absmax = 0.0;
+    for (int i = 0; i < total_weights; i++) { // Find the absolute maximum to use as our scale
+        if (fabs(float_weights->data[i]) > absmax) { // if this is the maximum value ive foudn so far
+            absmax = fabs(float_weights->data[i]); // set the value to be the maximum
+        }
+    }
+    *scale = absmax; // scale
+
+    double threshold = absmax * 0.4; // BitNet uses 40% of absmax
+
+    int packed_size = (total_weights + 3) / 4;
+    *packed_weights = malloc(packed_size * sizeof(uint8_t)); // Allocate the packed array (1 byte per 4 weights)
+
+
+    for (int i = 0; i < packed_size; i++) { // pack the weights 4 at a time
+        uint8_t byte = 0;
+
+        for (int j = 0; j < 4; j++) { // Process the 4 weights in the byte
+            int weight_idx = i * 4 + j;
+
+            if (weight_idx < total_weights) { // if we run out of weights just pad with 0s (isn't it better to pad with that one value we're not gonna use in the weight?)
+                double w = float_weights->data[weight_idx];
+                int two_bit = get2BitValue(w, threshold);
+
+                int shift = 6 - (j * 2); // shift it to the correct land
+                byte |= (two_bit << shift); // or it into the byte
+            }
+        }
+
+        (*packed_weights)[i] = byte; // put the packed weights into the byte
+    }
+}
+
 typedef struct { // adam optimizer. sgd (was used previously) is bad so i gotta use this
     matrix *m; // First moment
     matrix *v; // Second moment
@@ -151,18 +196,68 @@ void adamUpdate(matrix *weights, matrix *grads, adam_state *state, double lr) { 
 \* --------------------------------------------- */
 
 
-// < From here, the math gets more complicated, i copypasted some of it, i don't really know what it does but i guess it works >
+// < From here, the math gets more complicated, i copypasted some of it, i mostly know what it does but i guess it works >
 
-typedef struct { // New struct!!! yay
-    matrix *weights; // weights matrix
-    matrix *biases; // biases matrix
-    double (*activation)(double); // pointer to an activation function
-    adam_state *weight_adam; // adam weights and biases
-    adam_state *bias_adam;
-} layer; // asdlkasdlkj
+typedef struct { // new struct
+    matrix *weights; // master float weights (only used for Adam updates)
+    uint8_t *packed_weights; // bitnet weights
+    double scale; // scaling factor for the whole layer
+    matrix *unpacked_weights; // unpacked weights because optimization
+    matrix *biases; // biases
+    double (*activation)(double); // activation
+    adam_state *weight_adam; // adam weight
+    adam_state *bias_adam; // adam bias
+} layer;
+
+matrix *unpackWeights(uint8_t *packed_weights, double scale, int rows, int cols) { // unpacks packed weights
+    matrix *float_weights = newMatrix(rows, cols); // float weights
+    int total = rows * cols; // total
+
+    for (int i = 0; i < total; i++) { // loops
+        int byte_idx = i / 4; // unpacks weights
+        int bit_offset = 6 - ((i % 4) * 2);
+        uint8_t two_bit = (packed_weights[byte_idx] >> bit_offset) & 0x03;
+
+        double val = 0.0; // sets the value
+        if (two_bit == 2) val = 1.0;
+        else if (two_bit == 0) val = -1.0;
+
+        float_weights->data[i] = val * scale; // sets the float weights
+    }
+    return float_weights;// returns the float weights
+}
+
+matrix *ternaryMultiplyMatrix(matrix *input, uint8_t *packed_weights, double scale, int weight_rows, int weight_cols) { // matrix multiplication but ternary and fast and very cmcat
+    matrix *result = newMatrix(input->rows, weight_cols); // result matrix
+    int i, j, k; // loop variables
+
+    for (i = 0; i < input->rows; i++) { // loops through input rows and weight columns
+        for (j = 0; j < weight_cols; j++) {
+            double sum = 0.0; // sum variable
+            for (k = 0; k < input->columns; k++) { // loops through input columns
+                int weight_idx = k * weight_cols + j; // unpacks 2 bit weights
+                int byte_idx = weight_idx / 4;
+                int bit_offset = 6 - ((weight_idx % 4) * 2);
+                uint8_t two_bit = (packed_weights[byte_idx] >> bit_offset) & 0x03;
+
+                int t_val = 0; // Converts to ternary (-1 0 1)
+                if (two_bit == 2) t_val = 1;
+                else if (two_bit == 0) t_val = -1;
+
+                if (t_val == 1) { // add or subtract, no multiplication. this is literally what makes ternary weight (bitnet 1.58) models so fast
+                    sum += input->data[i * input->columns + k];
+                } else if (t_val == -1) {
+                    sum -= input->data[i * input->columns + k];
+                }
+            }
+            result->data[i * weight_cols + j] = sum * scale; // Multiply by the layer scale
+        }
+    }
+    return result; // returns the result
+}
 
 matrix *forward(layer *l, matrix *input, matrix *preact_out) { // i HATE forward passes
-    matrix *weighted = multiplyMatrix(input, l->weights); // sleep with one eye open
+    matrix *weighted = ternaryMultiplyMatrix(input, l->packed_weights, l->scale, l->weights->rows, l->weights->columns); // sleep with one eye open
     int i, j; // variables
     for (i = 0; i < weighted->rows; i++) // disgusting loop
         for (j = 0; j < weighted->columns; j++) { // disgusting loop
@@ -262,18 +357,50 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
     adamUpdate(l->biases, bias_grad, l->bias_adam, learning_rate); // updates
     freeMatrix(bias_grad); // frees
 
-    // compute input gradient: activation_grad * weights^T
-    matrix *weights_t = transposeMatrix(l->weights);
+    int total = l->weights->rows * l->weights->columns; // unpacks the weights in place because optimization
+    for (int i = 0; i < total; i++) {
+        int byte_idx = i / 4;
+        int bit_offset = 6 - ((i % 4) * 2);
+        uint8_t two_bit = (l->packed_weights[byte_idx] >> bit_offset) & 0x03;
+
+        double val = 0.0;
+        if (two_bit == 2) val = 1.0;
+        else if (two_bit == 0) val = -1.0;
+
+        l->unpacked_weights->data[i] = val * l->scale;
+    }
+
+    matrix *weights_t = transposeMatrix(l->unpacked_weights); // Compute input gradient using cache
     matrix *input_grad = multiplyMatrix(activation_grad, weights_t);
 
+    double absmax = 0.0; // Re quantize in place (super mega faster than previously)
+    for (int i = 0; i < total; i++) { // no comment
+        if (fabs(l->weights->data[i]) > absmax) absmax = fabs(l->weights->data[i]);
+    }
+    l->scale = absmax;
+    double threshold = absmax * 0.4;
+    int packed_size = (total + 3) / 4;
+
+    for (int i = 0; i < packed_size; i++) {
+        uint8_t byte = 0;
+        for (int j = 0; j < 4; j++) {
+            int weight_idx = i * 4 + j;
+            if (weight_idx < total) {
+                double w = l->weights->data[weight_idx];
+                int two_bit = get2BitValue(w, threshold);
+                int shift = 6 - (j * 2);
+                byte |= (two_bit << shift); // comment
+            }
+        }
+        l->packed_weights[i] = byte; // overwrite in place
+    }
+
+    freeMatrix(weights_t); // Free me from this hell
     freeMatrix(activation_grad);
     freeMatrix(input_t);
     freeMatrix(weight_grad);
-    freeMatrix(weights_t); // Free me from this hell
 
-    return input_grad;
-
-
+    return input_grad; // returns
 }
 
 matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYERnorm to distinguish from another thing called batch normalization, which is older and worse.
@@ -313,7 +440,7 @@ matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYER
 \* ------------ */
 
 
-//  </ From here, the math gets more complicated, i copypasted some of it, i don't really know what it does but i guess it works >
+//  </ From here, the math gets more complicated, i copypasted some of it, i mostly understand what it does but i guess it works >
 
 typedef struct { // YAY! New struct
     layer *layers; // layers
@@ -616,6 +743,15 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
         block->wo.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
     }
 
+    quantizeAndPack(block->wq.weights, &block->wq.packed_weights, &block->wq.scale); // quantize loss
+    block->wq.unpacked_weights = unpackWeights(block->wq.packed_weights, block->wq.scale, block->wq.weights->rows, block->wq.weights->columns); // unpack into cache
+    quantizeAndPack(block->wk.weights, &block->wk.packed_weights, &block->wk.scale);
+    block->wk.unpacked_weights = unpackWeights(block->wk.packed_weights, block->wk.scale, block->wk.weights->rows, block->wk.weights->columns);
+    quantizeAndPack(block->wv.weights, &block->wv.packed_weights, &block->wv.scale);
+    block->wv.unpacked_weights = unpackWeights(block->wv.packed_weights, block->wv.scale, block->wv.weights->rows, block->wv.weights->columns);
+    quantizeAndPack(block->wo.weights, &block->wo.packed_weights, &block->wo.scale);
+    block->wo.unpacked_weights = unpackWeights(block->wo.packed_weights, block->wo.scale, block->wo.weights->rows, block->wo.weights->columns);
+
     block->feedforward.weights = newMatrix(input_size, input_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
     block->feedforward.biases = newMatrix(1, input_size); // sets the biases to a matrix of 1 row and input_size columns
     block->feedforward.activation = activation; // sets the activation to activation
@@ -625,6 +761,9 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
 
     for (i = 0; i < input_size * input_size; i++) // for loop
         block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the weights randomly
+
+    quantizeAndPack(block->feedforward.weights, &block->feedforward.packed_weights, &block->feedforward.scale);
+    block->feedforward.unpacked_weights = unpackWeights(block->feedforward.packed_weights, block->feedforward.scale, block->feedforward.weights->rows, block->feedforward.weights->columns); //
 
     return block; // returns the meaning of life
 }

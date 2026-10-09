@@ -25,6 +25,9 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         unembed.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
     }
 
+    quantizeAndPack(unembed.weights, &unembed.packed_weights, &unembed.scale);
+    unembed.unpacked_weights = unpackWeights(unembed.packed_weights, unembed.scale, unembed.weights->rows, unembed.weights->columns);
+
     long file_size; // tokenization. time to set up bpe
     unsigned char *text_bytes = readFileToBytes("LICENSE", &file_size); // Read the file to bytes
 

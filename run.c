@@ -16,6 +16,14 @@ int main() {
     unembed.activation = linear;
 
     loadTransformerModel("model.bin", embed, net, &unembed); // loads the model
+    quantizeAndPack(unembed.weights, &unembed.packed_weights, &unembed.scale); // very super important
+    for (int i = 0; i < net->num_blocks; i++) { // repack transformer blocks
+        quantizeAndPack(net->blocks[i]->wq.weights, &net->blocks[i]->wq.packed_weights, &net->blocks[i]->wq.scale);
+        quantizeAndPack(net->blocks[i]->wk.weights, &net->blocks[i]->wk.packed_weights, &net->blocks[i]->wk.scale);
+        quantizeAndPack(net->blocks[i]->wv.weights, &net->blocks[i]->wv.packed_weights, &net->blocks[i]->wv.scale);
+        quantizeAndPack(net->blocks[i]->wo.weights, &net->blocks[i]->wo.packed_weights, &net->blocks[i]->wo.scale);
+        quantizeAndPack(net->blocks[i]->feedforward.weights, &net->blocks[i]->feedforward.packed_weights, &net->blocks[i]->feedforward.scale);
+    }
 
     const char *prompt = "GNU GENERAL PUBLIC LICENSE"; // generation
     long prompt_len;
