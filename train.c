@@ -1,6 +1,7 @@
 #include "misc.c" // includes literally everything train.c needs
 
 int main(){ // main training loop. as of now train.c is mostly a test, it isnt what i want it to be yet. wait patiently
+    omp_set_num_threads(omp_get_num_procs());
     int merges_a[2000], merges_b[2000]; int num_merges; // tokenization. this sets up the merges
     trainBPE("LICENSE", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on the license
     saveBPE("tokenizer.bin", merges_a, merges_b, num_merges); // saves bpe
@@ -13,8 +14,8 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     transformer_network *net = createTransformerNetwork(num_blocks, d_model, hidden_size, relu); // this is too, part of the structure
 
     layer unembed;
-    unembed.weights = newMatrix(d_model, vocab_size);
-    unembed.biases = newMatrix(1, vocab_size);
+    unembed.weights = newPersistentMatrix(d_model, vocab_size);
+    unembed.biases = newPersistentMatrix(1, vocab_size);
     unembed.activation = linear; // doesn't matter, unembeddingForward doesnt use activation
     unembed.weight_adam = createAdamState(unembed.weights);
     unembed.bias_adam = createAdamState(unembed.biases  );
@@ -25,6 +26,8 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         unembed.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
     }
 
+    unembed.packed_weights = NULL;
+    unembed.unpacked_weights = NULL;
     quantizeAndPack(unembed.weights, &unembed.packed_weights, &unembed.scale);
     unembed.unpacked_weights = unpackWeights(unembed.packed_weights, unembed.scale, unembed.weights->rows, unembed.weights->columns);
 
@@ -40,7 +43,9 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     int input_tokens[seq_len];
     int target_tokens[seq_len];
 
+    initArena();
     for (int stop = 0; stop < stops; stop++) { // the main training cycle loop
+        resetArena();
         // Pick a random starting point in the license
         int start = rand() % (total_tokens - seq_len - 1);
 

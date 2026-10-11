@@ -11,11 +11,14 @@ int main() {
     transformer_network *net = createTransformerNetwork(num_blocks, d_model, hidden_size, relu); // creates the network
 
     layer unembed; // unembed things
-    unembed.weights = newMatrix(d_model, vocab_size);
-    unembed.biases = newMatrix(1, vocab_size);
+    unembed.weights = newPersistentMatrix(d_model, vocab_size);
+    unembed.biases = newPersistentMatrix(1, vocab_size);
     unembed.activation = linear;
 
     loadTransformerModel("model.bin", embed, net, &unembed); // loads the model
+
+    unembed.packed_weights = NULL;
+    unembed.unpacked_weights = NULL;
     quantizeAndPack(unembed.weights, &unembed.packed_weights, &unembed.scale); // very super important
     for (int i = 0; i < net->num_blocks; i++) { // repack transformer blocks
         quantizeAndPack(net->blocks[i]->wq.weights, &net->blocks[i]->wq.packed_weights, &net->blocks[i]->wq.scale);
@@ -25,7 +28,7 @@ int main() {
         quantizeAndPack(net->blocks[i]->feedforward.weights, &net->blocks[i]->feedforward.packed_weights, &net->blocks[i]->feedforward.scale);
     }
 
-    const char *prompt = "GNU GENERAL PUBLIC LICENSE"; // generation
+    const char *prompt = "The GNU Affero General"; // generation
     long prompt_len;
     int *tokens = tokenize(prompt, &prompt_len, merges_a, merges_b, num_merges);
 
@@ -42,7 +45,9 @@ int main() {
 
     printf("Generating text...\n");
 
+    initArena();
     for (int step = 0; step < 50; step++) {
+        resetArena();
         matrix *embed_out = embeddingForward(embed, input_tokens, seq_len); // forward pass (which i HATE)
         matrix *pe = positionalEncoding(seq_len, d_model);
         matrix *input_to_net = addMatrix(embed_out, pe);

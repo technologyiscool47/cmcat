@@ -1,7 +1,29 @@
+/*
+ * cmcat - local llm, from scratch, in C.
+ * Copyright (C) 2026 technologyiscool47
+ *
+ * This program is free software (both as in free beer and as in freedom):
+ * you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
+ *
+ * Commercial licensing is available. technologyiscool47 is active on the following platforms:
+ * - Neocities (https://technologyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologyiscool47)
+ * - E-mail (technologyiscool47@gmail.com)
+ * Contact the author for details.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License v3.0 for more details.
+ */
+
 #include <stdio.h> // From the ashes of fallen kingdoms, the First Dragon forged the Runes of C. We are but mortals wielding their power. Now speak your incantations and see what stirs.
 #include <stdlib.h> // same but for stdlib.h
 #include <math.h> // BOOOORINGGGGGG
 #include <stdint.h> // for bitnet optimizations
+#include <string.h> // for memset
+#include <omp.h> // for multi threading
 
 #define LN_EPSILON 1e-5 // super small number. is used later on
 #define NUM_HEADS 8 // Spiders usually have 4 pairs of eyes, having 8 eyes in total. This line declares 8 heads for multi head attention. Attention heads are like eyes.
@@ -12,6 +34,64 @@
 // WARNING: At the time i'm writing this, i am a complete beginner to C. i apologise for the comments
 
 
+
+/* ---------------- *\
+   | Arena stuffs |
+\* ---------------- */
+
+
+
+#define ARENA_CHUNK_SIZE (16 * 1024 * 1024) // 16 MB per chunk
+
+typedef struct ArenaChunk { // arena chunk struct
+    unsigned char *buffer; // buffer
+    size_t offset; // offset
+    size_t size; // size
+    struct ArenaChunk *next; // next
+} ArenaChunk; // Alias
+
+ArenaChunk *arena_head = NULL; // sets the arena head and arena current to NULL
+ArenaChunk *arena_current = NULL;
+
+void initArena() { // function to initialize an arena
+    arena_head = malloc(sizeof(ArenaChunk)); // allocates an arena chunk
+    arena_head->buffer = malloc(ARENA_CHUNK_SIZE); // allocates a buffer
+    arena_head->offset = 0; // sets the offset to 0
+    arena_head->size = ARENA_CHUNK_SIZE; // sets the size
+    arena_head->next = NULL; // null
+    arena_current = arena_head; // sets the current arena
+} /*                                                                                                                                                                                                */
+
+void *arenaAlloc(size_t size) { // allocating arena function
+    size = (size + 7) & ~((size_t)7); // Align to 8 bytes for doubles
+
+    if (arena_current->offset + size > arena_current->size) { // if the current chunk doesn't have enough space, allocate a new one
+        size_t new_chunk_size = ARENA_CHUNK_SIZE; // sets the new chunk size
+        if (size > new_chunk_size) new_chunk_size = size; // Handle massive matrices
+
+        ArenaChunk *new_chunk = malloc(sizeof(ArenaChunk)); // allocates a new chunk
+        new_chunk->buffer = malloc(new_chunk_size); // allocates the buffer
+        new_chunk->offset = 0; // sets the offset to 0
+        new_chunk->size = new_chunk_size; // sets the size
+        new_chunk->next = NULL; // null
+
+        arena_current->next = new_chunk; // sets the next to the new chunk
+        arena_current = new_chunk; // sets the current chunk to the new chunk
+    }
+
+    void *ptr = &arena_current->buffer[arena_current->offset]; // pointer
+    arena_current->offset += size; // blah blah blah
+    return ptr; // returns
+}
+
+void resetArena() { // resets the arena
+    ArenaChunk *c = arena_head; // sets c to the arena head
+    while (c != NULL) { // while c exists
+        c->offset = 0; // reset the offset, but keep the buffer allocated
+        c = c->next; // sets c to c next
+    }
+    arena_current = arena_head; // Start back at the first chunk
+}
 
 
 /* --------------------------- *\
@@ -27,32 +107,51 @@ typedef struct{ // create a struct named matrix
 } matrix; // ending of the typedef phrase thing, name
 
 matrix *newMatrix(int rows, int columns) { // create a function (the code i used as a reference used the matrix struct instead of int for some reason)
-    if (rows <= 0 || columns <= 0) return NULL; // if the rows or columns are 0, return NULL
+    if (rows <= 0 || columns <= 0) { printf("cmai.c error: asked to create matrix with negative rows or columns"); return NULL; } // if the rows or columns are 0, return NULL
 
-    matrix *m = malloc(sizeof(matrix)); // create a matrix variable called m, which is also a pointer. then gets the size of a matrix struct and allocates it to the HEAP
-    if (!m)
-        return NULL;
+    matrix *m = arenaAlloc(sizeof(matrix)); // create a matrix variable called m, which is also a pointer. then gets the size of a matrix struct and allocates it to the arena
+    if (!m) { printf("cmai.c error: allocation of matrix failed"); return NULL; }
 
     m->rows = rows; // set the m pointer's rows to the function's rows
     m->columns = columns; // same but with columns
-    m->data = malloc(rows * columns * sizeof(double)); // allocates the m pointer's data
+    m->data = arenaAlloc(rows * columns * sizeof(double)); // allocates the m pointer's data
     if (!m->data) { // checks if the allocation succeeded
         free(m); // frees m
+        printf("cmai.c error: allocation of matrix data failed");
         return NULL; // returns null
     }
 
-    int i; // creates a variable named i, for a loop
-
-    for (i = 0; i < rows*columns; i++) // for loop
-        m->data[i] = 0; // sets m's data to 0.
+    memset(m->data, 0, rows * columns * sizeof(double)); // zeroes out memory
 
     return m;
 }
 
-void freeMatrix(matrix *m) { // makes a function named freeMatrix, it takes a pointer which has to be a matrix
-    if (m == NULL) return; // if, for some reason, null is input here, we do not accept it.
-    free(m->data); // frees m data
-    free(m); // frees m
+void freeMatrix(matrix *m) { (void)m; } // freematrix used to free a matrix but with the arena it doesnt matter anymore. i am keeping the function to avoid deleting it everywhere
+
+matrix *newPersistentMatrix(int rows, int columns) { // persistent matrix making function. takes rows and columns
+    if (rows <= 0 || columns <= 0) { printf("cmai.c error: asked to create persistent matrix with negative rows or columns"); return NULL; } // if the rows and columns are less than 0 return null
+
+    matrix *m = malloc(sizeof(matrix)); // allocates
+    if (!m) { printf("cmai.c error: allocation of persistent matrix failed"); return NULL; } // if allocation failed, return null and warning
+
+    m->rows = rows; // sets rows
+    m->columns = columns; // sets columns
+    m->data = malloc(rows * columns * sizeof(double)); // allocates data
+    if (!m->data) { // if allocation failed
+        free(m); // free
+        printf("cmai.c error: allocation of persistent matrix data failed"); // error
+        return NULL; // return
+    }
+
+    memset(m->data, 0, rows * columns * sizeof(double)); // zeroes out data
+
+    return m; // returns
+}
+
+void freePersistentMatrix(matrix *m) { // frees persistent matrix
+    if (m == NULL) { printf("cmai.c error: asked to free matrix that doesn't exist"); return; } // if m is null return
+    free(m->data); // frees
+    free(m); // frees
 }
 
 double getVal(matrix *m, int row, int col) { // makes a function called getval, takes a matrix pointer, rows value and columns value
@@ -79,29 +178,41 @@ void printMatrix(matrix *m) { // makes a function called printMatrix, takes a ma
 matrix *addMatrix(matrix *a, matrix *b) { // creates a function called addMatrix, takes 2 matrix pointers
     if (a->rows != b->rows || a->columns != b->columns) return NULL; // if a's rows arent the same as b's rows or the same with columns, return null
     matrix *result = newMatrix(a->rows, a->columns); // make a matrix called result, with a's rows and columns
-    int i; // i don't know what this does. it's way too difficult for me to understand. someone please explain
-    for (i = 0; i < a->rows * a->columns; i++) // iterates through every element in the matrix
+
+    int total = a->rows * a->columns; // total
+    #pragma omp parallel for schedule(static) // super very important!!!! instructions for the compiler to multi thread the following loop
+    for (int i = 0; i < total; i++) // iterates through every element in the matrix
         result->data[i] = a->data[i] + b->data[i]; // makes result's data the sum of a and b's data
+
     return result; // returns the result
 }
 
 matrix *transposeMatrix(matrix *m) { // makes a function called transposeMatrix, takes a matrix pointer
     matrix *result = newMatrix(m->columns, m->rows); // makes a matrix called result, takes makes m's columns its rows and likewise for m's rows
-    int i, j; // makes 2 variables
-    for (i = 0; i < m->rows; i++) // loop
-        for (j = 0; j < m->columns; j++) // loop
-            setVal(result, j, i, getVal(m, i, j)); // sets the value at j, i to the value at i, j
+
+    #pragma omp parallel for schedule(static) // instruction for compiler to run this on multiple threads
+    for (int i = 0; i < m->rows; i++) { // loop
+        for (int j = 0; j < m->columns; j++) { // loop
+            result->data[j * m->rows + i] = m->data[i * m->columns + j]; // sets the value at j,i to the value at i, j
+        }
+    }
     return result; // returns the result
 }
 
-matrix *multiplyMatrix(matrix *a, matrix *b) { // takes two matrices
+matrix *multiplyMatrix(matrix *a, matrix *b) { // takes 2 matrices
     if (a->columns != b->rows) return NULL; // if a's columns aren't b's rows, return null
     matrix *result = newMatrix(a->rows, b->columns); // makes a result matrix
-    int i, j, k; // loop variables
-    for (i = 0; i < a->rows; i++) // loop
-        for (j = 0; j < b->columns; j++) // loop
-            for (k = 0; k < a->columns; k++) // loop
-                result->data[i * result->columns + j] += a->data[i * a->columns + k] * b->data[k * b->columns + j]; // dot product of mystery and evil
+
+    #pragma omp parallel for schedule(static) // super important instruction for multi thread
+    for (int i = 0; i < a->rows; i++) { // loop
+        for (int j = 0; j < b->columns; j++) { // loop
+            double sum = 0.0; // sum
+            for (int k = 0; k < a->columns; k++) { // loop
+                sum += a->data[i * a->columns + k] * b->data[k * b->columns + j]; // math of mystery and evil
+            }
+            result->data[i * b->columns + j] = sum; // makes the result
+        }
+    }
     return result; // returns the result
 }
 
@@ -139,6 +250,11 @@ void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, double *sc
     double threshold = absmax * 0.4; // BitNet uses 40% of absmax
 
     int packed_size = (total_weights + 3) / 4;
+
+    if (*packed_weights != NULL) {
+        free(*packed_weights); // Prevent memory leak if called twice!
+    }
+
     *packed_weights = malloc(packed_size * sizeof(uint8_t)); // Allocate the packed array (1 byte per 4 weights)
 
 
@@ -169,8 +285,8 @@ typedef struct { // adam optimizer. sgd (was used previously) is bad so i gotta 
 
 adam_state *createAdamState(matrix *weights) { // creates an adam state opti,izer thing
     adam_state *state = malloc(sizeof(adam_state)); // allocates
-    state->m = newMatrix(weights->rows, weights->columns); // creates matrices
-    state->v = newMatrix(weights->rows, weights->columns);
+    state->m = newPersistentMatrix(weights->rows, weights->columns); // creates matrices
+    state->v = newPersistentMatrix(weights->rows, weights->columns);
     state->t = 0; // sets timestep to 0
     return state; // returns state
 }
@@ -210,7 +326,7 @@ typedef struct { // new struct
 } layer;
 
 matrix *unpackWeights(uint8_t *packed_weights, double scale, int rows, int cols) { // unpacks packed weights
-    matrix *float_weights = newMatrix(rows, cols); // float weights
+    matrix *float_weights = newPersistentMatrix(rows, cols); // float weights
     int total = rows * cols; // total
 
     for (int i = 0; i < total; i++) { // loops
@@ -229,31 +345,27 @@ matrix *unpackWeights(uint8_t *packed_weights, double scale, int rows, int cols)
 
 matrix *ternaryMultiplyMatrix(matrix *input, uint8_t *packed_weights, double scale, int weight_rows, int weight_cols) { // matrix multiplication but ternary and fast and very cmcat
     matrix *result = newMatrix(input->rows, weight_cols); // result matrix
-    int i, j, k; // loop variables
 
-    for (i = 0; i < input->rows; i++) { // loops through input rows and weight columns
-        for (j = 0; j < weight_cols; j++) {
-            double sum = 0.0; // sum variable
-            for (k = 0; k < input->columns; k++) { // loops through input columns
-                int weight_idx = k * weight_cols + j; // unpacks 2 bit weights
-                int byte_idx = weight_idx / 4;
-                int bit_offset = 6 - ((weight_idx % 4) * 2);
+    #pragma omp parallel for schedule(static) // super mega important multi thread instruction
+    for (int i = 0; i < input->rows; i++) { // loops through input rows and weight columns
+        for (int j = 0; j < weight_cols; j++) {
+            double sum = 0.0; // sum
+            for (int k = 0; k < input->columns; k++) { // loops through input columns
+                int weight_idx = k * weight_cols + j; // unpacks
+                int byte_idx = weight_idx >> 2;
+                int bit_offset = 6 - ((weight_idx & 3) << 1);
                 uint8_t two_bit = (packed_weights[byte_idx] >> bit_offset) & 0x03;
 
-                int t_val = 0; // Converts to ternary (-1 0 1)
-                if (two_bit == 2) t_val = 1;
-                else if (two_bit == 0) t_val = -1;
-
-                if (t_val == 1) { // add or subtract, no multiplication. this is literally what makes ternary weight (bitnet 1.58) models so fast
+                if (two_bit == 2) { // add or subtract, no multiplication. this is literally what makes ternary weight (bitnet 1.58) models so fast
                     sum += input->data[i * input->columns + k];
-                } else if (t_val == -1) {
+                } else if (two_bit == 0) {
                     sum -= input->data[i * input->columns + k];
                 }
             }
             result->data[i * weight_cols + j] = sum * scale; // Multiply by the layer scale
         }
     }
-    return result; // returns the result
+    return result;
 }
 
 matrix *forward(layer *l, matrix *input, matrix *preact_out) { // i HATE forward passes
@@ -702,22 +814,22 @@ typedef struct { // We're doing transformers now
 } transformer_block; // Alias
 
 transformer_block *createTransformerBlock(int input_size, int hidden_size, double (*activation)(double)) { // creates a transformer block. takes an input size, a hidden size and an activation
-    transformer_block *block = malloc(sizeof(transformer_block)); // allocates the block
+    transformer_block *block = calloc(1, sizeof(transformer_block)); // allocates the block
     if (block == NULL) return NULL;
 
-    block->wq.weights = newMatrix(input_size, input_size); // projection layer time. this is all just initialization, i wont comment on it
-    block->wq.biases = newMatrix(1, input_size);
+    block->wq.weights = newPersistentMatrix(input_size, input_size); // projection layer time. this is all just initialization, i wont comment on it
+    block->wq.biases = newPersistentMatrix(1, input_size);
     block->wq.activation = linear; // projections usually use relu so we'll use that // EDIT: No they do not, im stupid and the models loss very rarely drops below 5 with relu
-    block->wk.weights = newMatrix(input_size, input_size);
-    block->wk.biases = newMatrix(1, input_size);
+    block->wk.weights = newPersistentMatrix(input_size, input_size);
+    block->wk.biases = newPersistentMatrix(1, input_size);
     block->wk.activation = linear;
 
-    block->wv.weights = newMatrix(input_size, input_size);
-    block->wv.biases = newMatrix(1, input_size);
+    block->wv.weights = newPersistentMatrix(input_size, input_size);
+    block->wv.biases = newPersistentMatrix(1, input_size);
     block->wv.activation = linear;
 
-    block->wo.weights = newMatrix(input_size, input_size);
-    block->wo.biases = newMatrix(1, input_size);
+    block->wo.weights = newPersistentMatrix(input_size, input_size);
+    block->wo.biases = newPersistentMatrix(1, input_size);
     block->wo.activation = linear;
 
     block->wq.weight_adam = createAdamState(block->wq.weights); // adam state stuffs
@@ -752,8 +864,8 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     quantizeAndPack(block->wo.weights, &block->wo.packed_weights, &block->wo.scale);
     block->wo.unpacked_weights = unpackWeights(block->wo.packed_weights, block->wo.scale, block->wo.weights->rows, block->wo.weights->columns);
 
-    block->feedforward.weights = newMatrix(input_size, input_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
-    block->feedforward.biases = newMatrix(1, input_size); // sets the biases to a matrix of 1 row and input_size columns
+    block->feedforward.weights = newPersistentMatrix(input_size, input_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
+    block->feedforward.biases = newPersistentMatrix(1, input_size); // sets the biases to a matrix of 1 row and input_size columns
     block->feedforward.activation = activation; // sets the activation to activation
 
     block->feedforward.weight_adam = createAdamState(block->feedforward.weights); // more adam
@@ -770,20 +882,20 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
 
 void freeTransformerBlock(transformer_block *block) { // function that frees the Transformer block
     if (block == NULL) return; // if there's no block, return
-    freeMatrix(block->feedforward.weights); // frees
-    freeMatrix(block->feedforward.biases);
+    freePersistentMatrix(block->feedforward.weights); // frees
+    freePersistentMatrix(block->feedforward.biases);
 
-    freeMatrix(block->wq.weights); // projection freeing. no comment
-    freeMatrix(block->wq.biases);
+    freePersistentMatrix(block->wq.weights); // projection freeing. no comment
+    freePersistentMatrix(block->wq.biases);
 
-    freeMatrix(block->wk.weights);
-    freeMatrix(block->wk.biases);
+    freePersistentMatrix(block->wk.weights);
+    freePersistentMatrix(block->wk.biases);
 
-    freeMatrix(block->wv.weights);
-    freeMatrix(block->wv.biases);
+    freePersistentMatrix(block->wv.weights);
+    freePersistentMatrix(block->wv.biases);
 
-    freeMatrix(block->wo.weights);
-    freeMatrix(block->wo.biases);
+    freePersistentMatrix(block->wo.weights);
+    freePersistentMatrix(block->wo.biases);
 
     free(block);
 }
@@ -831,7 +943,7 @@ embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function,
 
     e->vocab_size = vocab_size; // sets vocab size
     e->embedding_dim = embedding_dim; // sets embedding dimensions
-    e->weights = newMatrix(vocab_size, embedding_dim); // sets weights
+    e->weights = newPersistentMatrix(vocab_size, embedding_dim); // sets weights
 
     e->weight_adam = createAdamState(e->weights);
 
@@ -847,7 +959,7 @@ embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function,
 
 void freeEmbedding(embedding *e) { // frees an embedding
     if (e == NULL) return; // error handling
-    freeMatrix(e->weights); // free the lookup table
+    freePersistentMatrix(e->weights); // free the lookup table
     free(e); // free the struct
 }
 
