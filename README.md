@@ -36,7 +36,7 @@ Either way, please tell me if you used AI and where you did it. Don't be shy :)
 
 ### License
 
-GPL v3
+AGPL v3 (changed from GPL v3 in October of 2026)
 
 ## Dear diary,
 

@@ -1,3 +1,23 @@
+/*
+ * cmcat - local llm, from scratch, in C.
+ * Copyright (C) 2026 technologyiscool47
+ *
+ * This program is free software (both as in free beer and as in freedom):
+ * you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
+ *
+ * Commercial licensing is available. technologyiscool47 is active on the following platforms:
+ * - Neocities (https://technologyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologyiscool47)
+ * - E-mail (technologyiscool47@gmail.com)
+ * Contact the author for details.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License v3.0 for more details.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // memset
