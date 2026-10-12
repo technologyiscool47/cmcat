@@ -21,7 +21,7 @@
 #include "misc.c" // includes literally everything train.c needs
 
 int main(){ // main training loop. as of now train.c is mostly a test, it isnt what i want it to be yet. wait patiently
-    omp_set_num_threads(omp_get_num_procs());
+    // omp_set_num_threads(omp_get_num_procs());
     int merges_a[2000], merges_b[2000]; int num_merges; // tokenization. this sets up the merges
     trainBPE("LICENSE", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on the license
     saveBPE("tokenizer.bin", merges_a, merges_b, num_merges); // saves bpe
@@ -76,11 +76,9 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         }
 
         matrix *embed_out = embeddingForward(embed, input_tokens, seq_len); // forward pass
-        matrix *pe = positionalEncoding(seq_len, d_model);
-        matrix *input_to_net = addMatrix(embed_out, pe);
 
         transformer_cache **caches = malloc(net->num_blocks * sizeof(transformer_cache *)); // allocate caches
-        matrix *net_out = transformerNetworkForward(input_to_net, net, caches); // pass through the transformer block
+        matrix *net_out = transformerNetworkForward(embed_out, net, caches); // pass through the transformer block
         matrix *logits = unembeddingForward(net_out, &unembed); // pass through the unembedding layer to get probabilities
 
         double loss = crossEntropyLoss(logits, target_tokens); // That one ctrl alt delete comic
@@ -118,8 +116,6 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
 
         // Free the forward pass matrices
         freeMatrix(embed_out);
-        freeMatrix(pe);
-        freeMatrix(input_to_net);
         freeMatrix(logits);
     }
     saveTransformerModel("model.bin", embed, net, &unembed);

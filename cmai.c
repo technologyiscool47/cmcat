@@ -180,7 +180,7 @@ matrix *addMatrix(matrix *a, matrix *b) { // creates a function called addMatrix
     matrix *result = newMatrix(a->rows, a->columns); // make a matrix called result, with a's rows and columns
 
     int total = a->rows * a->columns; // total
-    #pragma omp parallel for schedule(static) // super very important!!!! instructions for the compiler to multi thread the following loop
+    // #pragma omp parallel for schedule(static) // super very important!!!! instructions for the compiler to multi thread the following loop
     for (int i = 0; i < total; i++) // iterates through every element in the matrix
         result->data[i] = a->data[i] + b->data[i]; // makes result's data the sum of a and b's data
 
@@ -190,7 +190,7 @@ matrix *addMatrix(matrix *a, matrix *b) { // creates a function called addMatrix
 matrix *transposeMatrix(matrix *m) { // makes a function called transposeMatrix, takes a matrix pointer
     matrix *result = newMatrix(m->columns, m->rows); // makes a matrix called result, takes makes m's columns its rows and likewise for m's rows
 
-    #pragma omp parallel for schedule(static) // instruction for compiler to run this on multiple threads
+    // #pragma omp parallel for schedule(static) // instruction for compiler to run this on multiple threads
     for (int i = 0; i < m->rows; i++) { // loop
         for (int j = 0; j < m->columns; j++) { // loop
             result->data[j * m->rows + i] = m->data[i * m->columns + j]; // sets the value at j,i to the value at i, j
@@ -203,7 +203,7 @@ matrix *multiplyMatrix(matrix *a, matrix *b) { // takes 2 matrices
     if (a->columns != b->rows) return NULL; // if a's columns aren't b's rows, return null
     matrix *result = newMatrix(a->rows, b->columns); // makes a result matrix
 
-    #pragma omp parallel for schedule(static) // super important instruction for multi thread
+    // #pragma omp parallel for schedule(static) // super important instruction for multi thread
     for (int i = 0; i < a->rows; i++) { // loop
         for (int j = 0; j < b->columns; j++) { // loop
             double sum = 0.0; // sum
@@ -346,7 +346,7 @@ matrix *unpackWeights(uint8_t *packed_weights, double scale, int rows, int cols)
 matrix *ternaryMultiplyMatrix(matrix *input, uint8_t *packed_weights, double scale, int weight_rows, int weight_cols) { // matrix multiplication but ternary and fast and very cmcat
     matrix *result = newMatrix(input->rows, weight_cols); // result matrix
 
-    #pragma omp parallel for schedule(static) // super mega important multi thread instruction
+    // #pragma omp parallel for schedule(static) // super mega important multi thread instruction
     for (int i = 0; i < input->rows; i++) { // loops through input rows and weight columns
         for (int j = 0; j < weight_cols; j++) {
             double sum = 0.0; // sum
@@ -707,9 +707,45 @@ void softmax(matrix *m) { // soft max function. takes a matrix
     }
 }
 
+void applyRoPE(matrix *x, int seq_len, int d_model, int is_backward) { // apply rotary positional encoding
+    int head_dim = d_model / NUM_HEADS; // head dimensions
+    int half = head_dim / 2; // half of head dimensions
+
+    for (int m = 0; m < seq_len; m++) { // loops
+        for (int h = 0; h < NUM_HEADS; h++) { // loops
+            int offset = h * head_dim; // sets the offset to loop 2 by head dimensiions
+
+            for (int i = 0; i < half; i++) { // loops through the half
+                double freq = 1.0 / pow(10000.0, (2.0 * i) / head_dim); // The frequency for this specific dimension pair
+                double angle = m * freq; // angle
+
+                // In the backward pass, rotate by the inverse angle
+                if (is_backward) angle = -angle; // if this is use in backward invert angle
+
+                double cos_val = cos(angle); // cos of angle
+                double sin_val = sin(angle); // sin of angle
+
+                int idx1 = m * d_model + offset + i; // index 1
+                int idx2 = m * d_model + offset + i + half; // index 1 + half
+
+                double v1 = x->data[idx1]; // this
+                double v2 = x->data[idx2]; // that
+
+                // Apply the 2D rotation
+                x->data[idx1] = v1 * cos_val - v2 * sin_val; // magic
+                x->data[idx2] = v1 * sin_val + v2 * cos_val; // Should i try smoking Chinese medicinal herbs to increase my luck stat?
+            }
+        }
+    }
+}
+
 matrix *attention(matrix *queries, matrix *keys, matrix *values) { // Multi-Head attention!
     int seq_len = queries->rows;
     int d_model = queries->columns;
+
+    applyRoPE(queries, seq_len, d_model, 0);
+    applyRoPE(keys, seq_len, d_model, 0);
+
     int head_dim = d_model / NUM_HEADS; // dimensions per head
 
     matrix *final_output = newMatrix(seq_len, d_model); // This is where we glue all the heads back together at the end
@@ -1005,24 +1041,6 @@ void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_
     freeMatrix(weight_grad); // free the temporary matrix
 }
 
-matrix *positionalEncoding(int seq_len, int d_model) { // new function. We're doing positional encoding ¡
-    matrix *pe = newMatrix(seq_len, d_model); // makes a matrix called pe
-    int i, j; // loop cariables
-
-    for (i = 0; i < seq_len; i++) { // loops through rows
-        for (j = 0; j < d_model; j++) { // loops through columns
-            double freq = 1.0 / pow(10000.0, (2.0 * ((double)j / 2.0)) / d_model); // frequency variable
-
-            if (j % 2 == 0) { // if j is even
-                setVal(pe, i, j, sin(i * freq)); // sets sine
-            } else { // else
-                setVal(pe, i, j, cos(i * freq)); // sets cosine
-            }
-        }
-    }
-    return pe; // returns pe
-}
-
 matrix *unembeddingForward(matrix *input, layer *unembed) { // unembedding forward pass (which i HATE)
     matrix *preact = newMatrix(input->rows, unembed->weights->columns); // preact matrix
     matrix *logits = forward(unembed, input, preact); // logits matrix, forward pass
@@ -1196,6 +1214,9 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
         freeMatrix(S); // frees
         freeMatrix(s_g);
     }
+
+    applyRoPE(q_g, seq_len, d_model, 1); // unrotate before passing over the gradients
+    applyRoPE(k_g, seq_len, d_model, 1);
 
     *Q_grad = q_g; // sets the gradients
     *K_grad = k_g;

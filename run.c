@@ -69,11 +69,9 @@ int main() {
     for (int step = 0; step < 50; step++) {
         resetArena();
         matrix *embed_out = embeddingForward(embed, input_tokens, seq_len); // forward pass (which i HATE)
-        matrix *pe = positionalEncoding(seq_len, d_model);
-        matrix *input_to_net = addMatrix(embed_out, pe);
 
         transformer_cache **caches = malloc(net->num_blocks * sizeof(transformer_cache *));
-        matrix *net_out = transformerNetworkForward(input_to_net, net, caches);
+        matrix *net_out = transformerNetworkForward(embed_out, net, caches);
         matrix *logits = unembeddingForward(net_out, &unembed);
 
         // --- SAMPLING (Instead of Argmax) ---
@@ -104,8 +102,6 @@ int main() {
         input_tokens[seq_len - 1] = best_token;
 
         freeMatrix(embed_out); // DOWNLOAD FREE RAM
-        freeMatrix(pe);
-        freeMatrix(input_to_net);
         for (int i = 0; i < net->num_blocks; i++) {
             freeTransformerCache(caches[i]);
         }
