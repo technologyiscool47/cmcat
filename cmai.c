@@ -547,6 +547,27 @@ matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYER
     return out; // returns
 }
 
+matrix *rmsNorm(matrix *m) { // rmsnorm. much newer and faster than layernorm and does the same thing
+    matrix *out = newMatrix(m->rows, m->columns); // output matrix
+    int i, j; // loop variables
+
+    for (i = 0; i < m->rows; i++) {
+        double ms = 0.0;// Calculate the mean of squares
+        for (j = 0; j < m->columns; j++) {
+            double val = m->data[i * m->columns + j];
+            ms += val * val;
+        }
+        ms /= m->columns;
+
+        double rms = sqrt(ms + LN_EPSILON); // calculate the RMS (add epsilon for safety)
+
+        for (j = 0; j < m->columns; j++) { // Normalize
+            out->data[i * m->columns + j] = m->data[i * m->columns + j] / rms;
+        }
+    }
+    return out; // returns
+}
+
 /* ------------ *\
    | Networks |
 \* ------------ */
@@ -939,7 +960,7 @@ void freeTransformerBlock(transformer_block *block) { // function that frees the
 matrix *transformerForward(matrix *input, transformer_block *block, transformer_cache *cache) { // forward pass (which i HATE) on a transformer blocks. transformer caches make me sad
     cache->input = input; // saving input for backprop
 
-    cache->norm1 = layerNorm(input); // attention OUTput
+    cache->norm1 = rmsNorm(input); // attention OUTput
 
     cache->preact_q = newMatrix(cache->norm1->rows, block->wq.weights->columns); // making new matrices for the projections
     cache->preact_k = newMatrix(cache->norm1->rows, block->wk.weights->columns);
@@ -957,7 +978,7 @@ matrix *transformerForward(matrix *input, transformer_block *block, transformer_
 
     freeMatrix(proj_out);
 
-    cache->norm2 = layerNorm(cache->after_attn); // norm 2
+    cache->norm2 = rmsNorm(cache->after_attn); // norm 2
     cache->preact_ff = newMatrix(cache->norm2->rows, block->feedforward.biases->columns); // preact_ff matrix creation
     cache->ff_out = forward(&block->feedforward, cache->norm2, cache->preact_ff); // ff out forward pass thing
 
@@ -1249,11 +1270,41 @@ matrix *layerNormBackward(matrix *grad_out, matrix *normalized_out) { // layer n
     }
     return grad_in; // yay
 }
+
+matrix *rmsNormBackward(matrix *grad_out, matrix *normalized_out) { // backward for rmsnorm
+    matrix *grad_in = newMatrix(grad_out->rows, grad_out->columns); // grad in
+    int i, j; // loop variablesdd
+    int N = grad_out->columns; // N
+
+    for (i = 0; i < grad_out->rows; i++) {
+        double ms = 0.0; // Calculate the RMS of the normalized output
+        for (j = 0; j < N; j++) {
+            double y = getVal(normalized_out, i, j);
+            ms += y * y;
+        }
+        ms /= N;
+        double rms_inv = 1.0 / sqrt(ms + LN_EPSILON); // do not delete the epsilon
+
+        double dot = 0.0; // Calculate dot product of grad_out and normalized_out
+        for (j = 0; j < N; j++) {
+            dot += getVal(grad_out, i, j) * getVal(normalized_out, i, j);
+        }
+
+        for (j = 0; j < N; j++) { // 3. Final gradient
+            double dy = getVal(grad_out, i, j);
+            double y = getVal(normalized_out, i, j);
+            double dx = rms_inv * (dy - y * dot / N);
+            setVal(grad_in, i, j, dx);
+        }
+    }
+    return grad_in; // returns
+}
+
 matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of math that's super esoteric
     matrix *ff_out_grad = output_grad;// feedforward backward pass
     matrix *norm2_out_grad = backward(&block->feedforward, cache->norm2, ff_out_grad, learning_rate, cache->preact_ff);
 
-    matrix *after_attn_grad_from_ff = layerNormBackward(norm2_out_grad, cache->norm2); // i forgot the goddamn layernorm backward, so here it is
+    matrix *after_attn_grad_from_ff = rmsNormBackward(norm2_out_grad, cache->norm2); // rmsnorm backward
     freeMatrix(norm2_out_grad); // Free the intermediate gradient
 
     matrix *after_attn_grad = addMatrix(output_grad, after_attn_grad_from_ff); // "residual split" for after attn
@@ -1282,7 +1333,7 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(norm1_grad_v);
     freeMatrix(norm1_grad_tmp);
 
-    matrix *input_grad_part2 = layerNormBackward(norm1_grad, cache->norm1); // Layernorm1 backward
+    matrix *input_grad_part2 = rmsNormBackward(norm1_grad, cache->norm1); // rmsnorm backward
     freeMatrix(norm1_grad);
 
     matrix *final_input_grad = addMatrix(after_attn_grad, input_grad_part2); // final residual addition
