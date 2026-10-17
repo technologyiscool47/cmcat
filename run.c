@@ -45,7 +45,9 @@ int main() {
         quantizeAndPack(net->blocks[i]->wk.weights, &net->blocks[i]->wk.packed_weights, &net->blocks[i]->wk.scale);
         quantizeAndPack(net->blocks[i]->wv.weights, &net->blocks[i]->wv.packed_weights, &net->blocks[i]->wv.scale);
         quantizeAndPack(net->blocks[i]->wo.weights, &net->blocks[i]->wo.packed_weights, &net->blocks[i]->wo.scale);
-        quantizeAndPack(net->blocks[i]->feedforward.weights, &net->blocks[i]->feedforward.packed_weights, &net->blocks[i]->feedforward.scale);
+        quantizeAndPack(net->blocks[i]->ff_w_gate.weights, &net->blocks[i]->ff_w_gate.packed_weights, &net->blocks[i]->ff_w_gate.scale);
+        quantizeAndPack(net->blocks[i]->ff_w_up.weights, &net->blocks[i]->ff_w_up.packed_weights, &net->blocks[i]->ff_w_up.scale);
+        quantizeAndPack(net->blocks[i]->ff_w_down.weights, &net->blocks[i]->ff_w_down.packed_weights, &net->blocks[i]->ff_w_down.scale);
     }
 
     const char *prompt = "The GNU Affero General"; // generation

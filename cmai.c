@@ -229,6 +229,24 @@ double sigmoid(double x) { // makes the sigmoid function
     return 1.0 / (1.0 + exp(-x)); // return one difided by the sum of one plus the exponent of negative x
 }
 
+double silu(double x) { // silu
+    return x * sigmoid(x); // returns x multiplied by sigmoid of x
+}
+
+double silu_derivative(double x) { // derivative of silu
+    double s = sigmoid(x); // sets s to the sigmoid of x
+    return s + x * s * (1.0 - s); // math
+}
+
+matrix *multiplyElementWise(matrix *a, matrix *b) { // Element multiplication
+    matrix *result = newMatrix(a->rows, a->columns); // sets result to a matrix
+    int total = a->rows * a->columns; // total elements in a
+    for (int i = 0; i < total; i++) { // loops through everything
+        result->data[i] = a->data[i] * b->data[i]; // multiplies the data
+    }
+    return result; // returns the result
+}
+
 int get2BitValue(double weight, double threshold) { // Maps a ternary value to a 2 bit binary value
     if (weight > threshold) return 2;  // 1  -> 10
     if (weight < -threshold) return 0; // -1 -> 00
@@ -406,9 +424,10 @@ double sigmoid_derivative(double x) { // sigmoid but derivative
 }
 
 double activation_derivative(double (*func)(double), double x) { // absolutely, yes, of course
-    if (func == linear) return linear_derivative(x); // ADD THIS
+    if (func == linear) return linear_derivative(x);
     if (func == relu) return relu_derivative(x);
     if (func == sigmoid) return sigmoid_derivative(x);
+    if (func == silu) return silu_derivative(x);
     return 0;
 }
 
@@ -837,6 +856,11 @@ typedef struct { // new struct!!!!! we lowkey have to save some values in transf
     matrix *norm2; // same
     matrix *ff_out; // same
     matrix *output; // same
+    matrix *preact_gate; // SwiGLU
+    matrix *gate;
+    matrix *preact_up;
+    matrix *up;
+    matrix *prod; // The result of gate * up
 } transformer_cache; // alias
 
 transformer_cache *createTransformerCache() { // create transformer cache function
@@ -845,19 +869,28 @@ transformer_cache *createTransformerCache() { // create transformer cache functi
     return cache; // returns
 }
 
-void freeTransformerCache(transformer_cache *cache) { // free transformer cache function
-    if (cache == NULL) return; // checks if cache is null
-    freeMatrix(cache->norm1); // free everything inside the transformer cache
+void freeTransformerCache(transformer_cache *cache) {
+    if (cache == NULL) return;
+    freeMatrix(cache->norm1);
     freeMatrix(cache->Q);
     freeMatrix(cache->K);
-    freeMatrix(cache->V); // ok
+    freeMatrix(cache->V);
     freeMatrix(cache->preact_q);
     freeMatrix(cache->preact_k);
     freeMatrix(cache->preact_v);
     freeMatrix(cache->attn_out);
     freeMatrix(cache->after_attn);
     freeMatrix(cache->norm2);
+
+    // Free the SwiGLU cache matrices
+    freeMatrix(cache->preact_gate);
+    freeMatrix(cache->gate);
+    freeMatrix(cache->preact_up);
+    freeMatrix(cache->up);
+    freeMatrix(cache->prod);
+    freeMatrix(cache->preact_ff);
     freeMatrix(cache->ff_out);
+
     freeMatrix(cache->output);
     free(cache);
 }
@@ -867,7 +900,9 @@ typedef struct { // We're doing transformers now
     layer wk; // Key projection
     layer wv; // Value projection
     layer wo; // Output projection
-    layer feedforward; // layer
+    layer ff_w_gate; // SwiGLU things
+    layer ff_w_up;
+    layer ff_w_down;
 } transformer_block; // Alias
 
 transformer_block *createTransformerBlock(int input_size, int hidden_size, double (*activation)(double)) { // creates a transformer block. takes an input size, a hidden size and an activation
@@ -921,38 +956,83 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     quantizeAndPack(block->wo.weights, &block->wo.packed_weights, &block->wo.scale);
     block->wo.unpacked_weights = unpackWeights(block->wo.packed_weights, block->wo.scale, block->wo.weights->rows, block->wo.weights->columns);
 
-    block->feedforward.weights = newPersistentMatrix(input_size, input_size); // sets the weights to a matrix with rows(input) and columns(hidden size)
-    block->feedforward.biases = newPersistentMatrix(1, input_size); // sets the biases to a matrix of 1 row and input_size columns
-    block->feedforward.activation = activation; // sets the activation to activation
+    // Swiglu
 
-    block->feedforward.weight_adam = createAdamState(block->feedforward.weights); // more adam
-    block->feedforward.bias_adam = createAdamState(block->feedforward.biases);
 
-    for (i = 0; i < input_size * input_size; i++) // for loop
-        block->feedforward.weights->data[i] = (rand() % 100) / 100.0 - 0.5; // sets the weights randomly
+    block->ff_w_gate.weights = newPersistentMatrix(input_size, hidden_size); // Gate layer (input_size -> hidden_size)
+    block->ff_w_gate.biases = newPersistentMatrix(1, hidden_size);
+    block->ff_w_gate.activation = linear; // SiLU is applied manually later
+    block->ff_w_gate.weight_adam = createAdamState(block->ff_w_gate.weights);
+    block->ff_w_gate.bias_adam = createAdamState(block->ff_w_gate.biases);
+    double scale_gate = 1.0 / sqrt(input_size);
+    for (int i = 0; i < input_size * hidden_size; i++) {
+        block->ff_w_gate.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale_gate;
+    }
+    quantizeAndPack(block->ff_w_gate.weights, &block->ff_w_gate.packed_weights, &block->ff_w_gate.scale);
+    block->ff_w_gate.unpacked_weights = unpackWeights(block->ff_w_gate.packed_weights, block->ff_w_gate.scale, block->ff_w_gate.weights->rows, block->ff_w_gate.weights->columns);
 
-    quantizeAndPack(block->feedforward.weights, &block->feedforward.packed_weights, &block->feedforward.scale);
-    block->feedforward.unpacked_weights = unpackWeights(block->feedforward.packed_weights, block->feedforward.scale, block->feedforward.weights->rows, block->feedforward.weights->columns); //
+    block->ff_w_up.weights = newPersistentMatrix(input_size, hidden_size); // Up layer (input_size -> hidden_size)
+    block->ff_w_up.biases = newPersistentMatrix(1, hidden_size);
+    block->ff_w_up.activation = linear;
+    block->ff_w_up.weight_adam = createAdamState(block->ff_w_up.weights);
+    block->ff_w_up.bias_adam = createAdamState(block->ff_w_up.biases);
+    double scale_up = 1.0 / sqrt(input_size);
+    for (int i = 0; i < input_size * hidden_size; i++) {
+        block->ff_w_up.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale_up;
+    }
+    quantizeAndPack(block->ff_w_up.weights, &block->ff_w_up.packed_weights, &block->ff_w_up.scale);
+    block->ff_w_up.unpacked_weights = unpackWeights(block->ff_w_up.packed_weights, block->ff_w_up.scale, block->ff_w_up.weights->rows, block->ff_w_up.weights->columns);
+
+    block->ff_w_down.weights = newPersistentMatrix(hidden_size, input_size); // Down layer (hidden_size -> input_size)
+    block->ff_w_down.biases = newPersistentMatrix(1, input_size);
+    block->ff_w_down.activation = linear;
+    block->ff_w_down.weight_adam = createAdamState(block->ff_w_down.weights);
+    block->ff_w_down.bias_adam = createAdamState(block->ff_w_down.biases);
+    double scale_down = 1.0 / sqrt(hidden_size);
+    for (int i = 0; i < hidden_size * input_size; i++) {
+        block->ff_w_down.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale_down;
+    }
+    quantizeAndPack(block->ff_w_down.weights, &block->ff_w_down.packed_weights, &block->ff_w_down.scale);
+    block->ff_w_down.unpacked_weights = unpackWeights(block->ff_w_down.packed_weights, block->ff_w_down.scale, block->ff_w_down.weights->rows, block->ff_w_down.weights->columns);
 
     return block; // returns the meaning of life
 }
 
-void freeTransformerBlock(transformer_block *block) { // function that frees the Transformer block
-    if (block == NULL) return; // if there's no block, return
-    freePersistentMatrix(block->feedforward.weights); // frees
-    freePersistentMatrix(block->feedforward.biases);
+void freeLayer(layer *l) { // function to free a layer
+    if (l == NULL) return; // if layer doesnt exist, return
+    freePersistentMatrix(l->weights); // free
+    freePersistentMatrix(l->biases);
+    freePersistentMatrix(l->unpacked_weights);
 
-    freePersistentMatrix(block->wq.weights); // projection freeing. no comment
-    freePersistentMatrix(block->wq.biases);
+    if (l->packed_weights != NULL) {
+        free(l->packed_weights); // Free the 2-bit packed array
+    }
 
-    freePersistentMatrix(block->wk.weights);
-    freePersistentMatrix(block->wk.biases);
+    if (l->weight_adam != NULL) { // Free Adam states
+        freePersistentMatrix(l->weight_adam->m);
+        freePersistentMatrix(l->weight_adam->v);
+        free(l->weight_adam);
+    }
+    if (l->bias_adam != NULL) {
+        freePersistentMatrix(l->bias_adam->m);
+        freePersistentMatrix(l->bias_adam->v);
+        free(l->bias_adam);
+    }
+}
 
-    freePersistentMatrix(block->wv.weights);
-    freePersistentMatrix(block->wv.biases);
+void freeTransformerBlock(transformer_block *block) {
+    if (block == NULL) return; // if block doesnt exist, return
 
-    freePersistentMatrix(block->wo.weights);
-    freePersistentMatrix(block->wo.biases);
+    // Free all the projection layers
+    freeLayer(&block->wq);
+    freeLayer(&block->wk);
+    freeLayer(&block->wv);
+    freeLayer(&block->wo);
+
+    // Free the SwiGLU layers
+    freeLayer(&block->ff_w_gate);
+    freeLayer(&block->ff_w_up);
+    freeLayer(&block->ff_w_down);
 
     free(block);
 }
@@ -979,13 +1059,26 @@ matrix *transformerForward(matrix *input, transformer_block *block, transformer_
     freeMatrix(proj_out);
 
     cache->norm2 = rmsNorm(cache->after_attn); // norm 2
-    cache->preact_ff = newMatrix(cache->norm2->rows, block->feedforward.biases->columns); // preact_ff matrix creation
-    cache->ff_out = forward(&block->feedforward, cache->norm2, cache->preact_ff); // ff out forward pass thing
+
+    cache->preact_gate = newMatrix(cache->norm2->rows, block->ff_w_gate.weights->columns); // SwiGLU forward
+    cache->gate = forward(&block->ff_w_gate, cache->norm2, cache->preact_gate);
+
+    for (int i = 0; i < cache->gate->rows * cache->gate->columns; i++) {
+        cache->gate->data[i] = silu(cache->gate->data[i]); // Apply SiLU to the gate in place
+    }
+
+    cache->preact_up = newMatrix(cache->norm2->rows, block->ff_w_up.weights->columns);
+    cache->up = forward(&block->ff_w_up, cache->norm2, cache->preact_up);
+
+    cache->prod = multiplyElementWise(cache->gate, cache->up);
+
+    cache->preact_ff = newMatrix(cache->prod->rows, block->ff_w_down.weights->columns);
+    cache->ff_out = forward(&block->ff_w_down, cache->prod, cache->preact_ff);
 
     cache->output = addMatrix(cache->after_attn, cache->ff_out);
 
     return cache->output; // returns the output
-} // I want to make one thing clear: cmcat is not a learning project. It's two sevenths of a learning project at most, and even if it is, i am learning C. I am a complete poser in the world of AI and i do not mind it.
+} // I want to make one thing clear: cmcat is not a learning project. It's two sevenths of a learning project at most, and even if it is, i am learning C. I am a complete poser in AI and i do not mind it.
 
 typedef struct { // embedding struct
     matrix *weights; // giant lookup table for the embeddings
@@ -1300,9 +1393,29 @@ matrix *rmsNormBackward(matrix *grad_out, matrix *normalized_out) { // backward 
     return grad_in; // returns
 }
 
-matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of math that's super esoteric
-    matrix *ff_out_grad = output_grad;// feedforward backward pass
-    matrix *norm2_out_grad = backward(&block->feedforward, cache->norm2, ff_out_grad, learning_rate, cache->preact_ff);
+matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of super esoteric math
+    matrix *ff_out_grad = output_grad; // Backward through ff_w_down
+    matrix *prod_grad = backward(&block->ff_w_down, cache->prod, ff_out_grad, learning_rate, cache->preact_ff);
+
+    // Backward through elementwise multiply
+    matrix *gate_grad = multiplyElementWise(prod_grad, cache->up); // prod = gate * up => d(gate) = d(prod) * up, d(up) = d(prod) * gate
+    matrix *up_grad = multiplyElementWise(prod_grad, cache->gate);
+    freeMatrix(prod_grad);
+
+    for (int i = 0; i < gate_grad->rows * gate_grad->columns; i++) { // Backward through SiLU
+        double preact_val = cache->preact_gate->data[i]; // gate = silu(preact_gate) => d(preact_gate) = d(gate) * silu_derivative(preact_gate)
+        gate_grad->data[i] *= silu_derivative(preact_val);
+    }
+
+    matrix *norm2_grad_from_gate = backward(&block->ff_w_gate, cache->norm2, gate_grad, learning_rate, cache->preact_gate); // Backward through ff_w_gate and ff_w_up
+    matrix *norm2_grad_from_up = backward(&block->ff_w_up, cache->norm2, up_grad, learning_rate, cache->preact_up);
+
+    freeMatrix(gate_grad);
+    freeMatrix(up_grad);
+
+    matrix *norm2_out_grad = addMatrix(norm2_grad_from_gate, norm2_grad_from_up); // Sum the gradients because both came from norm2
+    freeMatrix(norm2_grad_from_gate);
+    freeMatrix(norm2_grad_from_up);
 
     matrix *after_attn_grad_from_ff = rmsNormBackward(norm2_out_grad, cache->norm2); // rmsnorm backward
     freeMatrix(norm2_out_grad); // Free the intermediate gradient
