@@ -118,6 +118,12 @@
    70 billion liters of water in the US per year while golf courses in the US use about 
    2 trillion liters) and add to noise pollution.
    
+   Local solutions like llama.cpp are fine if you have a gpu with more than 6gb VRAM and
+   relatively good performance. However, i don't need a 3080, i don't play very intensive
+   videogames and I don't want to spend 400$ on a new GPU just to use an LLM. So, i will
+   implement as much optimizations as i can to make cmcat be able to run well on a 20$
+   Xeon you can get off AliExpress
+   
    - CONTRIBUTION -
    
    Please contribute. Contact me if you want to implement a relatively big change,
