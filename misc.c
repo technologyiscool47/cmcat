@@ -1,15 +1,15 @@
 /*
  * cmcat - local llm, from scratch, in C.
- * Copyright (C) 2026 technologyiscool47
+ * Copyright (C) 2026 technologfyiscool47
  *
  * This program is free software (both as in free beer and as in freedom):
  * you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
  *
- * Commercial licensing is available. technologyiscool47 is active on the following platforms:
- * - Neocities (https://technologyiscool47.neocities.com)
- * - GitHub (https://github.com/technologyiscool47)
- * - E-mail (technologyiscool47@gmail.com)
+ * Commercial licensinfg is available. technologfyiscool47 is active on the following platforms:
+ * - Neocities (https://technologfyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologfyiscool47)
+ * - E-mail (technologfyiscool47@gmail.com)
  * Contact the author for details.
  *
  * This program is distributed in the hope that it will be useful,
@@ -204,30 +204,30 @@ void saveTransformerModel(const char *filename, embedding *embed, transformer_ne
         return;
     }
 
-    fwrite(embed->weights->data, sizeof(double), embed->weights->rows * embed->weights->columns, f); // writes embed weights
+    fwrite(embed->weights->data, sizeof(float), embed->weights->rows * embed->weights->columns, f); // writes embed weights
 
-    fwrite(unembed->weights->data, sizeof(double), unembed->weights->rows * unembed->weights->columns, f); // writes unembed weights and biases
-    fwrite(unembed->biases->data, sizeof(double), unembed->biases->rows * unembed->biases->columns, f);
+    fwrite(unembed->weights->data, sizeof(float), unembed->weights->rows * unembed->weights->columns, f); // writes unembed weights and biases
+    fwrite(unembed->biases->data, sizeof(float), unembed->biases->rows * unembed->biases->columns, f);
 
     for (int i = 0; i < net->num_blocks; i++) {
-        fwrite(net->blocks[i]->wq.weights->data, sizeof(double), net->blocks[i]->wq.weights->rows * net->blocks[i]->wq.weights->columns, f); // saves wq, wk, wv, wo and swiglu weights and biases
-        fwrite(net->blocks[i]->wq.biases->data, sizeof(double), net->blocks[i]->wq.biases->rows * net->blocks[i]->wq.biases->columns, f);
+        fwrite(net->blocks[i]->wq.weights->data, sizeof(float), net->blocks[i]->wq.weights->rows * net->blocks[i]->wq.weights->columns, f); // saves wq, wk, wv, wo and swiglu weights and biases
+        fwrite(net->blocks[i]->wq.biases->data, sizeof(float), net->blocks[i]->wq.biases->rows * net->blocks[i]->wq.biases->columns, f);
 
-        fwrite(net->blocks[i]->wk.weights->data, sizeof(double), net->blocks[i]->wk.weights->rows * net->blocks[i]->wk.weights->columns, f);
-        fwrite(net->blocks[i]->wk.biases->data, sizeof(double), net->blocks[i]->wk.biases->rows * net->blocks[i]->wk.biases->columns, f);
+        fwrite(net->blocks[i]->wk.weights->data, sizeof(float), net->blocks[i]->wk.weights->rows * net->blocks[i]->wk.weights->columns, f);
+        fwrite(net->blocks[i]->wk.biases->data, sizeof(float), net->blocks[i]->wk.biases->rows * net->blocks[i]->wk.biases->columns, f);
 
-        fwrite(net->blocks[i]->wv.weights->data, sizeof(double), net->blocks[i]->wv.weights->rows * net->blocks[i]->wv.weights->columns, f);
-        fwrite(net->blocks[i]->wv.biases->data, sizeof(double), net->blocks[i]->wv.biases->rows * net->blocks[i]->wv.biases->columns, f);
+        fwrite(net->blocks[i]->wv.weights->data, sizeof(float), net->blocks[i]->wv.weights->rows * net->blocks[i]->wv.weights->columns, f);
+        fwrite(net->blocks[i]->wv.biases->data, sizeof(float), net->blocks[i]->wv.biases->rows * net->blocks[i]->wv.biases->columns, f);
 
-        fwrite(net->blocks[i]->wo.weights->data, sizeof(double), net->blocks[i]->wo.weights->rows * net->blocks[i]->wo.weights->columns, f);
-        fwrite(net->blocks[i]->wo.biases->data, sizeof(double), net->blocks[i]->wo.biases->rows * net->blocks[i]->wo.biases->columns, f);
+        fwrite(net->blocks[i]->wo.weights->data, sizeof(float), net->blocks[i]->wo.weights->rows * net->blocks[i]->wo.weights->columns, f);
+        fwrite(net->blocks[i]->wo.biases->data, sizeof(float), net->blocks[i]->wo.biases->rows * net->blocks[i]->wo.biases->columns, f);
 
-        fwrite(net->blocks[i]->ff_w_gate.weights->data, sizeof(double), net->blocks[i]->ff_w_gate.weights->rows * net->blocks[i]->ff_w_gate.weights->columns, f);
-        fwrite(net->blocks[i]->ff_w_gate.biases->data, sizeof(double), net->blocks[i]->ff_w_gate.biases->rows * net->blocks[i]->ff_w_gate.biases->columns, f);
-        fwrite(net->blocks[i]->ff_w_up.weights->data, sizeof(double), net->blocks[i]->ff_w_up.weights->rows * net->blocks[i]->ff_w_up.weights->columns, f);
-        fwrite(net->blocks[i]->ff_w_up.biases->data, sizeof(double), net->blocks[i]->ff_w_up.biases->rows * net->blocks[i]->ff_w_up.biases->columns, f);
-        fwrite(net->blocks[i]->ff_w_down.weights->data, sizeof(double), net->blocks[i]->ff_w_down.weights->rows * net->blocks[i]->ff_w_down.weights->columns, f);
-        fwrite(net->blocks[i]->ff_w_down.biases->data, sizeof(double), net->blocks[i]->ff_w_down.biases->rows * net->blocks[i]->ff_w_down.biases->columns, f);
+        fwrite(net->blocks[i]->ff_w_gate.weights->data, sizeof(float), net->blocks[i]->ff_w_gate.weights->rows * net->blocks[i]->ff_w_gate.weights->columns, f);
+        fwrite(net->blocks[i]->ff_w_gate.biases->data, sizeof(float), net->blocks[i]->ff_w_gate.biases->rows * net->blocks[i]->ff_w_gate.biases->columns, f);
+        fwrite(net->blocks[i]->ff_w_up.weights->data, sizeof(float), net->blocks[i]->ff_w_up.weights->rows * net->blocks[i]->ff_w_up.weights->columns, f);
+        fwrite(net->blocks[i]->ff_w_up.biases->data, sizeof(float), net->blocks[i]->ff_w_up.biases->rows * net->blocks[i]->ff_w_up.biases->columns, f);
+        fwrite(net->blocks[i]->ff_w_down.weights->data, sizeof(float), net->blocks[i]->ff_w_down.weights->rows * net->blocks[i]->ff_w_down.weights->columns, f);
+        fwrite(net->blocks[i]->ff_w_down.biases->data, sizeof(float), net->blocks[i]->ff_w_down.biases->rows * net->blocks[i]->ff_w_down.biases->columns, f);
     }
 
     fclose(f); // closes the file
@@ -240,30 +240,30 @@ void loadTransformerModel(const char *filename, embedding *embed, transformer_ne
         return;
     }
 
-    fread(embed->weights->data, sizeof(double), embed->weights->rows * embed->weights->columns, f); // reads embed weights
+    fread(embed->weights->data, sizeof(float), embed->weights->rows * embed->weights->columns, f); // reads embed weights
 
-    fread(unembed->weights->data, sizeof(double), unembed->weights->rows * unembed->weights->columns, f); // reads unembed weights and biases
-    fread(unembed->biases->data, sizeof(double), unembed->biases->rows * unembed->biases->columns, f);
+    fread(unembed->weights->data, sizeof(float), unembed->weights->rows * unembed->weights->columns, f); // reads unembed weights and biases
+    fread(unembed->biases->data, sizeof(float), unembed->biases->rows * unembed->biases->columns, f);
 
     for (int i = 0; i < net->num_blocks; i++) {
-        fread(net->blocks[i]->wq.weights->data, sizeof(double), net->blocks[i]->wq.weights->rows * net->blocks[i]->wq.weights->columns, f); // reads wq, wk, wv, wo and feedforward weights and biases
-        fread(net->blocks[i]->wq.biases->data, sizeof(double), net->blocks[i]->wq.biases->rows * net->blocks[i]->wq.biases->columns, f);
+        fread(net->blocks[i]->wq.weights->data, sizeof(float), net->blocks[i]->wq.weights->rows * net->blocks[i]->wq.weights->columns, f); // reads wq, wk, wv, wo and feedforward weights and biases
+        fread(net->blocks[i]->wq.biases->data, sizeof(float), net->blocks[i]->wq.biases->rows * net->blocks[i]->wq.biases->columns, f);
 
-        fread(net->blocks[i]->wk.weights->data, sizeof(double), net->blocks[i]->wk.weights->rows * net->blocks[i]->wk.weights->columns, f);
-        fread(net->blocks[i]->wk.biases->data, sizeof(double), net->blocks[i]->wk.biases->rows * net->blocks[i]->wk.biases->columns, f);
+        fread(net->blocks[i]->wk.weights->data, sizeof(float), net->blocks[i]->wk.weights->rows * net->blocks[i]->wk.weights->columns, f);
+        fread(net->blocks[i]->wk.biases->data, sizeof(float), net->blocks[i]->wk.biases->rows * net->blocks[i]->wk.biases->columns, f);
 
-        fread(net->blocks[i]->wv.weights->data, sizeof(double), net->blocks[i]->wv.weights->rows * net->blocks[i]->wv.weights->columns, f);
-        fread(net->blocks[i]->wv.biases->data, sizeof(double), net->blocks[i]->wv.biases->rows * net->blocks[i]->wv.biases->columns, f);
+        fread(net->blocks[i]->wv.weights->data, sizeof(float), net->blocks[i]->wv.weights->rows * net->blocks[i]->wv.weights->columns, f);
+        fread(net->blocks[i]->wv.biases->data, sizeof(float), net->blocks[i]->wv.biases->rows * net->blocks[i]->wv.biases->columns, f);
 
-        fread(net->blocks[i]->wo.weights->data, sizeof(double), net->blocks[i]->wo.weights->rows * net->blocks[i]->wo.weights->columns, f);
-        fread(net->blocks[i]->wo.biases->data, sizeof(double), net->blocks[i]->wo.biases->rows * net->blocks[i]->wo.biases->columns, f);
+        fread(net->blocks[i]->wo.weights->data, sizeof(float), net->blocks[i]->wo.weights->rows * net->blocks[i]->wo.weights->columns, f);
+        fread(net->blocks[i]->wo.biases->data, sizeof(float), net->blocks[i]->wo.biases->rows * net->blocks[i]->wo.biases->columns, f);
 
-        fread(net->blocks[i]->ff_w_gate.weights->data, sizeof(double), net->blocks[i]->ff_w_gate.weights->rows * net->blocks[i]->ff_w_gate.weights->columns, f);
-        fread(net->blocks[i]->ff_w_gate.biases->data, sizeof(double), net->blocks[i]->ff_w_gate.biases->rows * net->blocks[i]->ff_w_gate.biases->columns, f);
-        fread(net->blocks[i]->ff_w_up.weights->data, sizeof(double), net->blocks[i]->ff_w_up.weights->rows * net->blocks[i]->ff_w_up.weights->columns, f);
-        fread(net->blocks[i]->ff_w_up.biases->data, sizeof(double), net->blocks[i]->ff_w_up.biases->rows * net->blocks[i]->ff_w_up.biases->columns, f);
-        fread(net->blocks[i]->ff_w_down.weights->data, sizeof(double), net->blocks[i]->ff_w_down.weights->rows * net->blocks[i]->ff_w_down.weights->columns, f);
-        fread(net->blocks[i]->ff_w_down.biases->data, sizeof(double), net->blocks[i]->ff_w_down.biases->rows * net->blocks[i]->ff_w_down.biases->columns, f);
+        fread(net->blocks[i]->ff_w_gate.weights->data, sizeof(float), net->blocks[i]->ff_w_gate.weights->rows * net->blocks[i]->ff_w_gate.weights->columns, f);
+        fread(net->blocks[i]->ff_w_gate.biases->data, sizeof(float), net->blocks[i]->ff_w_gate.biases->rows * net->blocks[i]->ff_w_gate.biases->columns, f);
+        fread(net->blocks[i]->ff_w_up.weights->data, sizeof(float), net->blocks[i]->ff_w_up.weights->rows * net->blocks[i]->ff_w_up.weights->columns, f);
+        fread(net->blocks[i]->ff_w_up.biases->data, sizeof(float), net->blocks[i]->ff_w_up.biases->rows * net->blocks[i]->ff_w_up.biases->columns, f);
+        fread(net->blocks[i]->ff_w_down.weights->data, sizeof(float), net->blocks[i]->ff_w_down.weights->rows * net->blocks[i]->ff_w_down.weights->columns, f);
+        fread(net->blocks[i]->ff_w_down.biases->data, sizeof(float), net->blocks[i]->ff_w_down.biases->rows * net->blocks[i]->ff_w_down.biases->columns, f);
     }
 
     fclose(f); // closes the file

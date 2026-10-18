@@ -1,15 +1,15 @@
 /*
  * cmcat - local llm, from scratch, in C.
- * Copyright (C) 2026 technologyiscool47
+ * Copyright (C) 2026 technologfyiscool47
  *
  * This program is free software (both as in free beer and as in freedom):
  * you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
  *
- * Commercial licensing is available. technologyiscool47 is active on the following platforms:
- * - Neocities (https://technologyiscool47.neocities.com)
- * - GitHub (https://github.com/technologyiscool47)
- * - E-mail (technologyiscool47@gmail.com)
+ * Commercial licensinfg is available. technologfyiscool47 is active on the following platforms:
+ * - Neocities (https://technologfyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologfyiscool47)
+ * - E-mail (technologfyiscool47@gmail.com)
  * Contact the author for details.
  *
  * This program is distributed in the hope that it will be useful,
@@ -77,8 +77,8 @@ int main() {
         matrix *logits = unembeddingForward(net_out, &unembed);
 
         // --- SAMPLING (Instead of Argmax) ---
-        double r = (double)rand() / RAND_MAX; // Roll a dice between 0 and 1
-        double cumulative_prob = 0.0;
+        float r = (float)rand() / RAND_MAX; // Roll a dice between 0 and 1
+        float cumulative_prob = 0.0f;
         int best_token = 0; // Fallback
 
         // Walk through the probabilities until we hit our random number

@@ -1,15 +1,15 @@
 /*
  * cmcat - local llm, from scratch, in C.
- * Copyright (C) 2026 technologyiscool47
+ * Copyright (C) 2026 technologfyiscool47
  *
  * This program is free software (both as in free beer and as in freedom):
  * you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
  *
- * Commercial licensing is available. technologyiscool47 is active on the following platforms:
- * - Neocities (https://technologyiscool47.neocities.com)
- * - GitHub (https://github.com/technologyiscool47)
- * - E-mail (technologyiscool47@gmail.com)
+ * Commercial licensinfg is available. technologfyiscool47 is active on the following platforms:
+ * - Neocities (https://technologfyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologfyiscool47)
+ * - E-mail (technologfyiscool47@gmail.com)
  * Contact the author for details.
  *
  * This program is distributed in the hope that it will be useful,
@@ -27,7 +27,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     saveBPE("tokenizer.bin", merges_a, merges_b, num_merges); // saves bpe
 
     int vocab_size = 256 + num_merges, d_model = 64, num_blocks = 2, hidden_size = 64, seq_len = 16, stops = 20000; // training variables and parameters
-    double learning_rate = 0.001; // also a training variable
+    float learning_rate = 0.001; // also a training variable
     srand(47);
 
     embedding *embed = createEmbedding(vocab_size, d_model); // time to make the model structure. no more tokenization for now
@@ -40,10 +40,10 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     unembed.weight_adam = createAdamState(unembed.weights);
     unembed.bias_adam = createAdamState(unembed.biases  );
 
-    double scale = 1.0 / sqrt(d_model);
+    float scale = 1.0f / sqrtf(d_model);
     int i;
     for (i = 0; i < d_model * vocab_size; i++) { // randomize weights
-        unembed.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
+        unembed.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
     }
 
     unembed.packed_weights = NULL;
@@ -81,7 +81,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         matrix *net_out = transformerNetworkForward(embed_out, net, caches); // pass through the transformer block
         matrix *logits = unembeddingForward(net_out, &unembed); // pass through the unembedding layer to get probabilities
 
-        double loss = crossEntropyLoss(logits, target_tokens); // That one ctrl alt delete comic
+        float loss = crossEntropyLoss(logits, target_tokens); // That one ctrl alt delete comic
 
         if (stop % 100 == 0) {
             printf("stop %d - loss: %.6f\n", stop, loss); // prints Loss
@@ -89,7 +89,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
 
         matrix *output_grad = newMatrix(logits->rows, logits->columns); // backprop time. output gradient
         crossEntropyLossGradient(logits, target_tokens, output_grad); // calculate loss
-        clipGradients(output_grad, 1.0); // Don't let the gradients explode!
+        clipGradients(output_grad, 1.0f); // Don't let the gradients explode!
 
         matrix *unembed_preact = newMatrix(net_out->rows, unembed.weights->columns); // I didn't cache this, but backward() needs it so
         matrix *net_out_grad = backward(&unembed, net_out, output_grad, learning_rate, unembed_preact); // this
@@ -98,7 +98,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         matrix *current_grad = net_out_grad; // do the propogation // fnuyy line nuber
         for (int j = net->num_blocks - 1; j >= 0; j--) {
             matrix *next_grad = transformerBackward(net->blocks[j], caches[j], current_grad, learning_rate);
-            clipGradients(next_grad, 1.0); // Clip internal gradients because i didnt think of implementing global clipping and now i have to either do local or rewrite everything smh
+            clipGradients(next_grad, 1.0f); // Clip internal gradients because i didnt think of implementing global clipping and now i have to either do local or rewrite everything smh
             freeMatrix(current_grad);
             current_grad = next_grad;
         }

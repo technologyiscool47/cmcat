@@ -1,3 +1,4 @@
+```
 
                                                                                   @@@@@@@@@@@@@
      CCCCC M   M CCCCC  AAA  TTTTT                                          @@@@@             @@@@@@@@@@@@@
@@ -141,15 +142,16 @@
    
    Q: Why is your README in plain text? What is that ASCII art in the top right?
    
-   A: Because markdown is boring for me. Normal plain text embraces some of my creativity.
+   A: Because markdown is boring imo. Normal plain text lets me embrace more of my creativity.
    The ASCII art is of a Chinese mountain cat
    
    Q: oh mah GAWD!!! why is there no AGENT MODE??!?!?!? 2/10!!!!
    make cmcat have a vibe coding mode!!!!11!!!
    
    A: no. cmcat is and will be an engine, not a big suite with web UIs and agents 
-   deleting your /home directory and coding in english. It does one thing. Look at this:
+   deleting your /home directory and coding in english. It does 2 things: running and training. Look at this:
    
    cat document.txt | ./run model.bin --prompt "Summarize this:" > summary.txt
    
    what a beauty! If you want a web UI, make one. It is not my job to make wrappers.
+```

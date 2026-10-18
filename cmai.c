@@ -25,9 +25,10 @@
 #include <string.h> // for memset
 #include <omp.h> // for multi threading
 
-#define LN_EPSILON 1e-5 // super small number. is used later on
+#define LN_EPSILON 1e-5f // super small number. is used later on
+#define NUM_KV_GROUPS 2 // kv gropus
 #define NUM_HEADS 8 // Spiders usually have 4 pairs of eyes, having 8 eyes in total. This line declares 8 heads for multi head attention. Attention heads are like eyes.
-                    // Does that mean that cmcat is a spider? Let's find out! Using advanced analysis, it has become clear that me, technologyiscool47 is scared of
+                    // Does that mean that cmcat is a spider? Let's find out! Usinfg advanced analysis, it has become clear that me, technologyiscool47 is scared of
                     // spiders. However, I am not scared of cmcat which means that spiders and this project are not the same thing.
 
 
@@ -63,7 +64,7 @@ void initArena() { // function to initialize an arena
 } /*                                                                                                                                                                                                */
 
 void *arenaAlloc(size_t size) { // allocating arena function
-    size = (size + 7) & ~((size_t)7); // Align to 8 bytes for doubles
+    size = (size + 7) & ~((size_t)7); // Align to 8 bytes for floats
 
     if (arena_current->offset + size > arena_current->size) { // if the current chunk doesn't have enough space, allocate a new one
         size_t new_chunk_size = ARENA_CHUNK_SIZE; // sets the new chunk size
@@ -103,7 +104,7 @@ void resetArena() { // resets the arena
 typedef struct{ // create a struct named matrix
     int rows; // self-explanatory
     int columns; // self-explanatory
-    double *data; // create a pointer to double named data
+    float *data; // create a pointer to float named data
 } matrix; // ending of the typedef phrase thing, name
 
 matrix *newMatrix(int rows, int columns) { // create a function (the code i used as a reference used the matrix struct instead of int for some reason)
@@ -114,14 +115,14 @@ matrix *newMatrix(int rows, int columns) { // create a function (the code i used
 
     m->rows = rows; // set the m pointer's rows to the function's rows
     m->columns = columns; // same but with columns
-    m->data = arenaAlloc(rows * columns * sizeof(double)); // allocates the m pointer's data
+    m->data = arenaAlloc(rows * columns * sizeof(float)); // allocates the m pointer's data
     if (!m->data) { // checks if the allocation succeeded
         free(m); // frees m
         printf("cmai.c error: allocation of matrix data failed");
         return NULL; // returns null
     }
 
-    memset(m->data, 0, rows * columns * sizeof(double)); // zeroes out memory
+    memset(m->data, 0, rows * columns * sizeof(float)); // zeroes out memory
 
     return m;
 }
@@ -136,14 +137,14 @@ matrix *newPersistentMatrix(int rows, int columns) { // persistent matrix making
 
     m->rows = rows; // sets rows
     m->columns = columns; // sets columns
-    m->data = malloc(rows * columns * sizeof(double)); // allocates data
+    m->data = malloc(rows * columns * sizeof(float)); // allocates data
     if (!m->data) { // if allocation failed
         free(m); // free
         printf("cmai.c error: allocation of persistent matrix data failed"); // error
         return NULL; // return
     }
 
-    memset(m->data, 0, rows * columns * sizeof(double)); // zeroes out data
+    memset(m->data, 0, rows * columns * sizeof(float)); // zeroes out data
 
     return m; // returns
 }
@@ -154,13 +155,13 @@ void freePersistentMatrix(matrix *m) { // frees persistent matrix
     free(m); // frees
 }
 
-double getVal(matrix *m, int row, int col) { // makes a function called getval, takes a matrix pointer, rows value and columns value
+float getVal(matrix *m, int row, int col) { // makes a function called getval, takes a matrix pointer, rows value and columns value
     if (row < 0 || row >= m->rows || col < 0 || col >= m->columns) return NAN; // bounds check
     if (m == NULL) return NAN; // m being null check
     return m->data[row * m->columns + col]; // returns
 }
 
-void setVal(matrix *m, int row, int col, double val) { // maeks a function called setVal, its very similar to getval but it also takes a double value that we're going to set
+void setVal(matrix *m, int row, int col, float val) { // maeks a function called setVal, its very similar to getval but it also takes a float value that we're going to set
     if (row < 0 || row >= m->rows || col < 0 || col >= m->columns) return; // bounds check
     m->data[row * m->columns + col] = val; // sets the data at the specified rows and columns to val
 } // yes
@@ -206,7 +207,7 @@ matrix *multiplyMatrix(matrix *a, matrix *b) { // takes 2 matrices
     // #pragma omp parallel for schedule(static) // super important instruction for multi thread
     for (int i = 0; i < a->rows; i++) { // loop
         for (int j = 0; j < b->columns; j++) { // loop
-            double sum = 0.0; // sum
+            float sum = 0.0f; // sum
             for (int k = 0; k < a->columns; k++) { // loop
                 sum += a->data[i * a->columns + k] * b->data[k * b->columns + j]; // math of mystery and evil
             }
@@ -216,26 +217,26 @@ matrix *multiplyMatrix(matrix *a, matrix *b) { // takes 2 matrices
     return result; // returns the result
 }
 
-double linear(double x) { // linear activation, literally does nothing
+float linear(float x) { // linear activation, literally does nothing
     return x; // does nothing
 }
 
-double relu(double x) { // makes a function
+float relu(float x) { // makes a function
     if (x < 0) return 0; // If x is less than 0, return 0
     return x; // return x
 }
 
-double sigmoid(double x) { // makes the sigmoid function
-    return 1.0 / (1.0 + exp(-x)); // return one difided by the sum of one plus the exponent of negative x
+float sigmoid(float x) { // makes the sigmoid function
+    return 1.0f / (1.0f + expf(-x)); // return one difided by the sum of one plus the exponent of negative x
 }
 
-double silu(double x) { // silu
+float silu(float x) { // silu
     return x * sigmoid(x); // returns x multiplied by sigmoid of x
 }
 
-double silu_derivative(double x) { // derivative of silu
-    double s = sigmoid(x); // sets s to the sigmoid of x
-    return s + x * s * (1.0 - s); // math
+float silu_derivative(float x) { // derivative of silu
+    float s = sigmoid(x); // sets s to the sigmoid of x
+    return s + x * s * (1.0f - s); // math
 }
 
 matrix *multiplyElementWise(matrix *a, matrix *b) { // Element multiplication
@@ -247,25 +248,25 @@ matrix *multiplyElementWise(matrix *a, matrix *b) { // Element multiplication
     return result; // returns the result
 }
 
-int get2BitValue(double weight, double threshold) { // Maps a ternary value to a 2 bit binary value
+int get2BitValue(float weight, float threshold) { // Maps a ternary value to a 2 bit binary value
     if (weight > threshold) return 2;  // 1  -> 10
     if (weight < -threshold) return 0; // -1 -> 00
     return 1;                          // 0  -> 01
 }
 
-void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, double *scale) {
+void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, float *scale) {
     int total_weights = float_weights->rows * float_weights->columns;
 
 
-    double absmax = 0.0;
+    float absmax = 0.0f;
     for (int i = 0; i < total_weights; i++) { // Find the absolute maximum to use as our scale
-        if (fabs(float_weights->data[i]) > absmax) { // if this is the maximum value ive foudn so far
-            absmax = fabs(float_weights->data[i]); // set the value to be the maximum
+        if (fabsf(float_weights->data[i]) > absmax) { // if this is the maximum value ive foudn so far
+            absmax = fabsf(float_weights->data[i]); // set the value to be the maximum
         }
     }
     *scale = absmax; // scale
 
-    double threshold = absmax * 0.4; // BitNet uses 40% of absmax
+    float threshold = absmax * 0.4f; // BitNet uses 40% of absmax
 
     int packed_size = (total_weights + 3) / 4;
 
@@ -283,7 +284,7 @@ void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, double *sc
             int weight_idx = i * 4 + j;
 
             if (weight_idx < total_weights) { // if we run out of weights just pad with 0s (isn't it better to pad with that one value we're not gonna use in the weight?)
-                double w = float_weights->data[weight_idx];
+                float w = float_weights->data[weight_idx];
                 int two_bit = get2BitValue(w, threshold);
 
                 int shift = 6 - (j * 2); // shift it to the correct land
@@ -309,19 +310,19 @@ adam_state *createAdamState(matrix *weights) { // creates an adam state opti,ize
     return state; // returns state
 }
 
-void adamUpdate(matrix *weights, matrix *grads, adam_state *state, double lr) { // updates adam
+void adamUpdate(matrix *weights, matrix *grads, adam_state *state, float lr) { // updates adam
     state->t++; // increments timestep
-    double beta1 = 0.9, beta2 = 0.999, eps = 1e-8; //  beta 1, beta 2 and epsilon but different
+    float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f; //  beta 1, beta 2 and epsilon but different
 
     for (int i = 0; i < weights->rows * weights->columns; i++) { // loop
-        double g = grads->data[i]; // maths that i will not comment on
-        state->m->data[i] = beta1 * state->m->data[i] + (1.0 - beta1) * g;
-        state->v->data[i] = beta2 * state->v->data[i] + (1.0 - beta2) * g * g;
+        float g = grads->data[i]; // maths that i will not comment on
+        state->m->data[i] = beta1 * state->m->data[i] + (1.0f - beta1) * g;
+        state->v->data[i] = beta2 * state->v->data[i] + (1.0f - beta2) * g * g;
 
-        double m_hat = state->m->data[i] / (1.0 - pow(beta1, state->t));
-        double v_hat = state->v->data[i] / (1.0 - pow(beta2, state->t));
+        float m_hat = state->m->data[i] / (1.0f - powf(beta1, state->t));
+        float v_hat = state->v->data[i] / (1.0f - powf(beta2, state->t));
 
-        weights->data[i] -= lr * m_hat / (sqrt(v_hat) + eps);
+        weights->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps);
     }
 }
 
@@ -335,15 +336,15 @@ void adamUpdate(matrix *weights, matrix *grads, adam_state *state, double lr) { 
 typedef struct { // new struct
     matrix *weights; // master float weights (only used for Adam updates)
     uint8_t *packed_weights; // bitnet weights
-    double scale; // scaling factor for the whole layer
+    float scale; // scaling factor for the whole layer
     matrix *unpacked_weights; // unpacked weights because optimization
     matrix *biases; // biases
-    double (*activation)(double); // activation
+    float (*activation)(float); // activation
     adam_state *weight_adam; // adam weight
     adam_state *bias_adam; // adam bias
 } layer;
 
-matrix *unpackWeights(uint8_t *packed_weights, double scale, int rows, int cols) { // unpacks packed weights
+matrix *unpackWeights(uint8_t *packed_weights, float scale, int rows, int cols) { // unpacks packed weights
     matrix *float_weights = newPersistentMatrix(rows, cols); // float weights
     int total = rows * cols; // total
 
@@ -352,22 +353,22 @@ matrix *unpackWeights(uint8_t *packed_weights, double scale, int rows, int cols)
         int bit_offset = 6 - ((i % 4) * 2);
         uint8_t two_bit = (packed_weights[byte_idx] >> bit_offset) & 0x03;
 
-        double val = 0.0; // sets the value
-        if (two_bit == 2) val = 1.0;
-        else if (two_bit == 0) val = -1.0;
+        float val = 0.0f; // sets the value
+        if (two_bit == 2) val = 1.0f;
+        else if (two_bit == 0) val = -1.0f;
 
         float_weights->data[i] = val * scale; // sets the float weights
     }
     return float_weights;// returns the float weights
 }
 
-matrix *ternaryMultiplyMatrix(matrix *input, uint8_t *packed_weights, double scale, int weight_rows, int weight_cols) { // matrix multiplication but ternary and fast and very cmcat
+matrix *ternaryMultiplyMatrix(matrix *input, uint8_t *packed_weights, float scale, int weight_rows, int weight_cols) { // matrix multiplication but ternary and fast and very cmcat
     matrix *result = newMatrix(input->rows, weight_cols); // result matrix
 
     // #pragma omp parallel for schedule(static) // super mega important multi thread instruction
     for (int i = 0; i < input->rows; i++) { // loops through input rows and weight columns
         for (int j = 0; j < weight_cols; j++) {
-            double sum = 0.0; // sum
+            float sum = 0.0f; // sum
             for (int k = 0; k < input->columns; k++) { // loops through input columns
                 int weight_idx = k * weight_cols + j; // unpacks
                 int byte_idx = weight_idx >> 2;
@@ -391,7 +392,7 @@ matrix *forward(layer *l, matrix *input, matrix *preact_out) { // i HATE forward
     int i, j; // variables
     for (i = 0; i < weighted->rows; i++) // disgusting loop
         for (j = 0; j < weighted->columns; j++) { // disgusting loop
-            double val = getVal(weighted, i, j) + getVal(l->biases, 0, j); // evil declaration of a variable, adds biases
+            float val = getVal(weighted, i, j) + getVal(l->biases, 0, j); // evil declaration of a variable, adds biases
             setVal(preact_out, i, j, val); // evil preact variable. part of a horrible fix later on
             val = l->activation(val); // horrible variable
             setVal(weighted, i, j, val); // sets a value
@@ -399,31 +400,31 @@ matrix *forward(layer *l, matrix *input, matrix *preact_out) { // i HATE forward
     return weighted; // returs
 }
 
-double mse(matrix *predicted, matrix *actual) { // takes two matrices
+float mse(matrix *predicted, matrix *actual) { // takes two matrices
     if (predicted->rows != actual->rows || predicted->columns != actual->columns) return -1; // if the rows and columns aren't the same across the two matirices, return -1
-    double sum = 0; //
+    float sum = 0; //
     int i; // variable
     for (i = 0; i < predicted->rows * predicted->columns; i++) { // loop
-        double diff = predicted->data[i] - actual->data[i]; // does a buncha math
+        float diff = predicted->data[i] - actual->data[i]; // does a buncha math
         sum += diff * diff; // very esoteric math
     }
     return sum / (predicted->rows * predicted->columns); // returns
 }
 
-double linear_derivative(double x) { // linear derivative, literally just returns 1
-    return 1.0; // the derivative of x is always 1
+float linear_derivative(float x) { // linear derivative, literally just returns 1
+    return 1.0f; // the derivative of x is always 1
 }
 
-double relu_derivative(double x) { // relu but derivative :thumbsup:
-    return x > 0 ? 1.0 : 0.0; // math.
+float relu_derivative(float x) { // relu but derivative :thumbsup:
+    return x > 0 ? 1.0f : 0.0f; // math.
 }
 
-double sigmoid_derivative(double x) { // sigmoid but derivative
-    double s = sigmoid(x); // sigmoid
-    return s * (1.0 - s); // derivative
+float sigmoid_derivative(float x) { // sigmoid but derivative
+    float s = sigmoid(x); // sigmoid
+    return s * (1.0f - s); // derivative
 }
 
-double activation_derivative(double (*func)(double), double x) { // absolutely, yes, of course
+float activation_derivative(float (*func)(float), float x) { // absolutely, yes, of course
     if (func == linear) return linear_derivative(x);
     if (func == relu) return relu_derivative(x);
     if (func == sigmoid) return sigmoid_derivative(x);
@@ -431,28 +432,28 @@ double activation_derivative(double (*func)(double), double x) { // absolutely, 
     return 0;
 }
 
-void clipGradients(matrix *m, double max_norm) { // gradient clipping to stop them from exploding // used to be right after transformerBackward but i have to use this in backward so the definition must be before backward
-    double total_norm = 0.0;
+void clipGradients(matrix *m, float max_norm) { // gradient clipping to stop them from exploding // used to be right after transformerBackward but i have to use this in backward so the definition must be before backward
+    float total_norm = 0.0f;
     int i;
 
     for (i = 0; i < m->rows * m->columns; i++) { // hklsfzhkfgzyl
-        if (isnan(m->data[i]) || isinf(m->data[i])) { // if we encounter infinity or a nan, reset gradient to 0
-            for (i = 0; i < m->rows * m->columns; i++) m->data[i] = 0.0;
+        if (isnan(m->data[i]) || isinff(m->data[i])) { // if we encounter infinity or a nan, reset gradient to 0
+            for (i = 0; i < m->rows * m->columns; i++) m->data[i] = 0.0f;
             return;
         }
         total_norm += m->data[i] * m->data[i];
     }
-    total_norm = sqrt(total_norm);
+    total_norm = sqrtf(total_norm);
 
     if (total_norm > max_norm) { // if it's too big, shrink the damn gradients
-        double scale = max_norm / total_norm;
+        float scale = max_norm / total_norm;
         for (i = 0; i < m->rows * m->columns; i++) {
             m->data[i] *= scale;
         }
     }
 }
 
-matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_rate, matrix *preact) { // backprop is hard.
+matrix *backward(layer *l, matrix *input, matrix *output_grad, float learning_rate, matrix *preact) { // backprop is hard.
     // output_grad is the gradient from the loss function
     // we need to propagate it back and update weights/biases
 
@@ -462,9 +463,9 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
     // apply activation derivative to output_grad
     for (i = 0; i < output_grad->rows; i++) { // loop
         for (j = 0; j < output_grad->columns; j++) { // loop
-            double preact_val = getVal(preact, i, j); // preact stuff required for an annoying fix
-            double act_deriv = activation_derivative(l->activation, preact_val);
-            double grad_val = getVal(output_grad, i, j);
+            float preact_val = getVal(preact, i, j); // preact stuff required for an annoying fix
+            float act_deriv = activation_derivative(l->activation, preact_val);
+            float grad_val = getVal(output_grad, i, j);
             setVal(activation_grad, i, j, grad_val * act_deriv); // sets a value
         }
     }
@@ -479,7 +480,7 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
     // Update biases
     matrix *bias_grad = newMatrix(1, activation_grad->columns); // (we need a temporary matrix for the bias gradient)
     for (j = 0; j < activation_grad->columns; j++) {
-        double bg = 0;
+        float bg = 0;
         for (i = 0; i < activation_grad->rows; i++) {
             bg += getVal(activation_grad, i, j);
         }
@@ -494,9 +495,9 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
         int bit_offset = 6 - ((i % 4) * 2);
         uint8_t two_bit = (l->packed_weights[byte_idx] >> bit_offset) & 0x03;
 
-        double val = 0.0;
-        if (two_bit == 2) val = 1.0;
-        else if (two_bit == 0) val = -1.0;
+        float val = 0.0f;
+        if (two_bit == 2) val = 1.0f;
+        else if (two_bit == 0) val = -1.0f;
 
         l->unpacked_weights->data[i] = val * l->scale;
     }
@@ -504,12 +505,12 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
     matrix *weights_t = transposeMatrix(l->unpacked_weights); // Compute input gradient using cache
     matrix *input_grad = multiplyMatrix(activation_grad, weights_t);
 
-    double absmax = 0.0; // Re quantize in place (super mega faster than previously)
+    float absmax = 0.0f; // Re quantize in place (super mega faster than previously)
     for (int i = 0; i < total; i++) { // no comment
-        if (fabs(l->weights->data[i]) > absmax) absmax = fabs(l->weights->data[i]);
+        if (fabsf(l->weights->data[i]) > absmax) absmax = fabsf(l->weights->data[i]);
     }
     l->scale = absmax;
-    double threshold = absmax * 0.4;
+    float threshold = absmax * 0.4f;
     int packed_size = (total + 3) / 4;
 
     for (int i = 0; i < packed_size; i++) {
@@ -517,7 +518,7 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, double learning_r
         for (int j = 0; j < 4; j++) {
             int weight_idx = i * 4 + j;
             if (weight_idx < total) {
-                double w = l->weights->data[weight_idx];
+                float w = l->weights->data[weight_idx];
                 int two_bit = get2BitValue(w, threshold);
                 int shift = 6 - (j * 2);
                 byte |= (two_bit << shift); // comment
@@ -540,7 +541,7 @@ matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYER
 
     matrix *out = newMatrix(m->rows, m->columns); // output matrix
     int i, j; // loop variables!!!
-    double mean, variance, std_dev; // more variables
+    float mean, variance, std_dev; // more variables
 
     for (i = 0; i < m->rows; i++) { // loopy loop loop!!! loops through rows
         mean = 0; // sets mean to 0
@@ -552,14 +553,14 @@ matrix *layerNorm(matrix *m) { // new function. normalizes a matrix. named LAYER
 
         variance = 0; // variance time
         for (j = 0; j < m->columns; j++) { // loops through columns
-            double diff = m->data[i * m->columns + j] - mean; // sets diff to m's data at i and j
+            float diff = m->data[i * m->columns + j] - mean; // sets diff to m's data at i and j
             variance += diff * diff; // math
         }
         variance /= m->columns; // divides variance by columns
 
-        std_dev = sqrt(variance + LN_EPSILON); // sets std_dev to the square root of variance and epsilon (small number)
+        std_dev = sqrtf(variance + LN_EPSILON); // sets std_dev to the square root of variance and epsilon (small number)
         for (j = 0; j < m->columns; j++) { // another loop through columns
-            double normalized = (m->data[i * m->columns + j] - mean) / std_dev; // sets normalized to m's data subtracted by mean divided by std_dev
+            float normalized = (m->data[i * m->columns + j] - mean) / std_dev; // sets normalized to m's data subtracted by mean divided by std_dev
             setVal(out, i, j, normalized); // sets out to normalized
         }
     }
@@ -571,14 +572,14 @@ matrix *rmsNorm(matrix *m) { // rmsnorm. much newer and faster than layernorm an
     int i, j; // loop variables
 
     for (i = 0; i < m->rows; i++) {
-        double ms = 0.0;// Calculate the mean of squares
+        float ms = 0.0f;// Calculate the mean of squares
         for (j = 0; j < m->columns; j++) {
-            double val = m->data[i * m->columns + j];
+            float val = m->data[i * m->columns + j];
             ms += val * val;
         }
         ms /= m->columns;
 
-        double rms = sqrt(ms + LN_EPSILON); // calculate the RMS (add epsilon for safety)
+        float rms = sqrtf(ms + LN_EPSILON); // calculate the RMS (add epsilon for safety)
 
         for (j = 0; j < m->columns; j++) { // Normalize
             out->data[i * m->columns + j] = m->data[i * m->columns + j] / rms;
@@ -599,7 +600,7 @@ typedef struct { // YAY! New struct
     int num_layers; // how many layers
 } network; // Elías
 
-network *createNetwork(int *sizes, int num_layers, double (*activation)(double)) { // i have a good feeling about this
+network *createNetwork(int *sizes, int num_layers, float (*activation)(float)) { // i have a good feeling about this
     if (num_layers <= 0) return NULL; // HELL YEAH WE'RE CHECKING IF THE num_layers IS LESS THAN 0
     network *net = malloc(sizeof(network)); // LETS GOOO we're allocating!!!!
     net->num_layers = num_layers; // YAHAHAHA THE num_layers IS num_layers!
@@ -612,7 +613,7 @@ network *createNetwork(int *sizes, int num_layers, double (*activation)(double))
         net->layers[i].activation = activation; // Can't forget about the activation
 
         for (j = 0; j < sizes[i] * sizes[i+1]; j++) // MORE LOOPS HAHA
-            net->layers[i].weights->data[j] = (rand() % 100) / 100.0 - 0.5; // random initialization for weights
+            net->layers[i].weights->data[j] = (rand() % 100) / 100.0f - 0.5; // random initialization for weights
     }
 
     return net; // We're returning!!!!! :)
@@ -670,7 +671,7 @@ forward_cache *networkForward(network *net, matrix *input) { // makes a function
     return cache; // mystery
 }
 
-void networkBackward(network *net, forward_cache *cache, matrix *output_grad, double learning_rate) { // backward pass function for networks. takes:
+void networkBackward(network *net, forward_cache *cache, matrix *output_grad, float learning_rate) { // backward pass function for networks. takes:
     // a network, a forward cache, a matrix which will be the output and a learning rate
 
     matrix *current_grad = output_grad; // makes a matrix called current_grad, sets it to output_grad
@@ -699,8 +700,8 @@ void saveNetwork(network *net, const char *filename) { // save Network
 
     int i; // mysterious
     for (i = 0; i < net->num_layers - 1; i++) { // loop
-        fwrite(net->layers[i].weights->data, sizeof(double), net->layers[i].weights->rows * net->layers[i].weights->columns, f); // write net->layers[i].weights->data to f. the fwrite function is very difficult :(((
-        fwrite(net->layers[i].biases->data, sizeof(double), net->layers[i].biases->rows * net->layers[i].biases->columns, f); // same but with biases
+        fwrite(net->layers[i].weights->data, sizeof(float), net->layers[i].weights->rows * net->layers[i].weights->columns, f); // write net->layers[i].weights->data to f. the fwrite function is very difficult :(((
+        fwrite(net->layers[i].biases->data, sizeof(float), net->layers[i].biases->rows * net->layers[i].biases->columns, f); // same but with biases
     }
 
     fclose(f); // close file
@@ -712,8 +713,8 @@ void loadNetwork(network *net, const char *filename) { // load Network
 
     int i; // i dont know what this does
     for (i = 0; i < net->num_layers - 1; i++) { // loop
-        fread(net->layers[i].weights->data, sizeof(double), net->layers[i].weights->rows * net->layers[i].weights->columns, f); // similar to the fwrites in saveNetwork, also difficult :(
-        fread(net->layers[i].biases->data, sizeof(double), net->layers[i].biases->rows * net->layers[i].biases->columns, f); // biases
+        fread(net->layers[i].weights->data, sizeof(float), net->layers[i].weights->rows * net->layers[i].weights->columns, f); // similar to the fwrites in saveNetwork, also difficult :(
+        fread(net->layers[i].biases->data, sizeof(float), net->layers[i].biases->rows * net->layers[i].biases->columns, f); // biases
     }
 
     fclose(f); // CLOSE CLOSE CLOSE
@@ -727,16 +728,16 @@ void softmax(matrix *m) { // soft max function. takes a matrix
     int i, j; // loop variables
 
     for (i = 0; i < m->rows; i++) { // loop for the rows
-        double max_val = m->data[i * m->columns]; // find max in this row
+        float max_val = m->data[i * m->columns]; // find max in this row
         for (j = 0; j < m->columns; j++) { // yet another loop
             if (m->data[i * m->columns + j] > max_val) // very complicated copypasted code
                 max_val = m->data[i * m->columns + j]; // same
         }
 
-        double sum = 0; // sum of exponentials
+        float sum = 0; // sum of exponentials
         for (j = 0; j < m->columns; j++) { // loopy loop loop
-            double val = m->data[i * m->columns + j] - max_val; // subtract max for stability because everyone does it
-            m->data[i * m->columns + j] = exp(val); // e^x
+            float val = m->data[i * m->columns + j] - max_val; // subtract max for stability because everyone does it
+            m->data[i * m->columns + j] = expf(val); // e^x
             sum += m->data[i * m->columns + j]; // sum
         }
 
@@ -756,20 +757,20 @@ void applyRoPE(matrix *x, int seq_len, int d_model, int is_backward) { // apply 
             int offset = h * head_dim; // sets the offset to loop 2 by head dimensiions
 
             for (int i = 0; i < half; i++) { // loops through the half
-                double freq = 1.0 / pow(10000.0, (2.0 * i) / head_dim); // The frequency for this specific dimension pair
-                double angle = m * freq; // angle
+                float freq = 1.0f / powf(10000.0f, (2.0f * i) / head_dim); // The frequency for this specific dimension pair
+                float angle = m * freq; // angle
 
                 // In the backward pass, rotate by the inverse angle
                 if (is_backward) angle = -angle; // if this is use in backward invert angle
 
-                double cos_val = cos(angle); // cos of angle
-                double sin_val = sin(angle); // sin of angle
+                float cos_val = cosf(angle); // cosf of angle
+                float sin_val = sinf(angle); // sinf of angle
 
                 int idx1 = m * d_model + offset + i; // index 1
                 int idx2 = m * d_model + offset + i + half; // index 1 + half
 
-                double v1 = x->data[idx1]; // this
-                double v2 = x->data[idx2]; // that
+                float v1 = x->data[idx1]; // this
+                float v2 = x->data[idx2]; // that
 
                 // Apply the 2D rotation
                 x->data[idx1] = v1 * cos_val - v2 * sin_val; // magic
@@ -782,61 +783,57 @@ void applyRoPE(matrix *x, int seq_len, int d_model, int is_backward) { // apply 
 matrix *attention(matrix *queries, matrix *keys, matrix *values) { // Multi-Head attention!
     int seq_len = queries->rows;
     int d_model = queries->columns;
+    int head_dim = d_model / NUM_HEADS; // dimensions per head
+    int kv_dim = head_dim * NUM_KV_GROUPS; // kv dimensions
 
     applyRoPE(queries, seq_len, d_model, 0);
-    applyRoPE(keys, seq_len, d_model, 0);
+    applyRoPE(keys, seq_len, kv_dim, 0); // kv
 
-    int head_dim = d_model / NUM_HEADS; // dimensions per head
-
-    matrix *final_output = newMatrix(seq_len, d_model); // This is where we glue all the heads back together at the end
+    matrix *final_output = newMatrix(seq_len, d_model); // final output matrix
 
     int h, i, j, k;
-
     for (h = 0; h < NUM_HEADS; h++) { // process each head independently
-        int offset = h * head_dim; // which 8 columns are we looking at?
+        // Map the query heads to the kv groups
+        int kv_group = h / (NUM_HEADS / NUM_KV_GROUPS);
+        int q_offset = h * head_dim;
+        int kv_offset = kv_group * head_dim;
 
-        // calculate scores for this head
         matrix *scores = newMatrix(seq_len, seq_len);
-        double scale = 1.0 / sqrt(head_dim); // Scale by sqrt head dim
+        float scale = 1.0f / sqrtf(head_dim); // Scale by sqrt head dim
 
-        for (i = 0; i < seq_len; i++) {
-            for (j = 0; j < seq_len; j++) {
-                double dot = 0.0;
-                for (k = 0; k < head_dim; k++) {
+        for (i = 0; i < seq_len; i++) { // loop
+            for (j = 0; j < seq_len; j++) { // loop
+                float dot = 0.0f;
+                for (int d = 0; d < head_dim; d++) {
                     // Only multiply the [[HEAD DIM]] columns belonging to this head
-                    double q_val = getVal(queries, i, offset + k);
-                    double k_val = getVal(keys, j, offset + k);
+                    float q_val = getVal(queries, i, q_offset + d);
+                    float k_val = getVal(keys, j, kv_offset + d); // Using kv_offset
                     dot += q_val * k_val;
                 }
                 setVal(scores, i, j, dot * scale);
             }
         }
 
-        // causal Mask
+        // Causal Mask
         for (i = 0; i < seq_len; i++) {
             for (j = 0; j < seq_len; j++) {
-                if (j > i) {
-                    setVal(scores, i, j, -10000.0);
-                }
+                if (j > i) setVal(scores, i, j, -10000.0f);
             }
         }
 
         softmax(scores); // softmax over the scores
 
-        // Multiply scores by V_h to get the head's output
         for (i = 0; i < seq_len; i++) {
-            for (k = 0; k < head_dim; k++) {
-                double val = 0.0;
+            for (int d = 0; d < head_dim; d++) {
+                float val = 0.0f;
                 for (j = 0; j < seq_len; j++) {
-                    val += getVal(scores, i, j) * getVal(values, j, offset + k);
+                    val += getVal(scores, i, j) * getVal(values, j, kv_offset + d); // Using kv_offset
                 }
-                setVal(final_output, i, offset + k, val); // Glue heads output into final matrix
+                setVal(final_output, i, q_offset + d, val); // Glue heads output into final matrix
             }
         }
-
         freeMatrix(scores);
     }
-
     return final_output; // returns
 }
 
@@ -905,19 +902,22 @@ typedef struct { // We're doing transformers now
     layer ff_w_down;
 } transformer_block; // Alias
 
-transformer_block *createTransformerBlock(int input_size, int hidden_size, double (*activation)(double)) { // creates a transformer block. takes an input size, a hidden size and an activation
+transformer_block *createTransformerBlock(int input_size, int hidden_size, float (*activation)(float)) { // creates a transformer block. takes an input size, a hidden size and an activation
     transformer_block *block = calloc(1, sizeof(transformer_block)); // allocates the block
     if (block == NULL) return NULL;
 
-    block->wq.weights = newPersistentMatrix(input_size, input_size); // projection layer time. this is all just initialization, i wont comment on it
+    int kv_dim = (input_size / NUM_HEADS) * NUM_KV_GROUPS; // kv dimensions
+
+    block->wq.weights = newPersistentMatrix(input_size, input_size); // projection initialization. its very repetitive so no comment
     block->wq.biases = newPersistentMatrix(1, input_size);
-    block->wq.activation = linear; // projections usually use relu so we'll use that // EDIT: No they do not, im stupid and the models loss very rarely drops below 5 with relu
-    block->wk.weights = newPersistentMatrix(input_size, input_size);
-    block->wk.biases = newPersistentMatrix(1, input_size);
+    block->wq.activation = linear;
+
+    block->wk.weights = newPersistentMatrix(input_size, kv_dim);
+    block->wk.biases = newPersistentMatrix(1, kv_dim);
     block->wk.activation = linear;
 
-    block->wv.weights = newPersistentMatrix(input_size, input_size);
-    block->wv.biases = newPersistentMatrix(1, input_size);
+    block->wv.weights = newPersistentMatrix(input_size, kv_dim);
+    block->wv.biases = newPersistentMatrix(1, kv_dim);
     block->wv.activation = linear;
 
     block->wo.weights = newPersistentMatrix(input_size, input_size);
@@ -937,14 +937,19 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     block->wo.bias_adam = createAdamState(block->wo.biases);
 
     // Randomize the projection weights
-    double scale = 1.0 / sqrt(input_size);
+    float scale = 1.0f / sqrtf(input_size);
 
     int i;
-    for (i = 0; i < input_size * input_size; i++) {
-        block->wq.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
-        block->wk.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
-        block->wv.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
-        block->wo.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale;
+    // Randomize wq and wo
+    for (i = 0; i < block->wq.weights->rows * block->wq.weights->columns; i++) {
+        block->wq.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
+        block->wo.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
+    }
+
+    // Randomize wk and wv
+    for (i = 0; i < block->wk.weights->rows * block->wk.weights->columns; i++) {
+        block->wk.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
+        block->wv.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
     }
 
     quantizeAndPack(block->wq.weights, &block->wq.packed_weights, &block->wq.scale); // quantize loss
@@ -964,9 +969,9 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     block->ff_w_gate.activation = linear; // SiLU is applied manually later
     block->ff_w_gate.weight_adam = createAdamState(block->ff_w_gate.weights);
     block->ff_w_gate.bias_adam = createAdamState(block->ff_w_gate.biases);
-    double scale_gate = 1.0 / sqrt(input_size);
+    float scale_gate = 1.0f / sqrtf(input_size);
     for (int i = 0; i < input_size * hidden_size; i++) {
-        block->ff_w_gate.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale_gate;
+        block->ff_w_gate.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale_gate;
     }
     quantizeAndPack(block->ff_w_gate.weights, &block->ff_w_gate.packed_weights, &block->ff_w_gate.scale);
     block->ff_w_gate.unpacked_weights = unpackWeights(block->ff_w_gate.packed_weights, block->ff_w_gate.scale, block->ff_w_gate.weights->rows, block->ff_w_gate.weights->columns);
@@ -976,9 +981,9 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     block->ff_w_up.activation = linear;
     block->ff_w_up.weight_adam = createAdamState(block->ff_w_up.weights);
     block->ff_w_up.bias_adam = createAdamState(block->ff_w_up.biases);
-    double scale_up = 1.0 / sqrt(input_size);
+    float scale_up = 1.0f / sqrtf(input_size);
     for (int i = 0; i < input_size * hidden_size; i++) {
-        block->ff_w_up.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale_up;
+        block->ff_w_up.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale_up;
     }
     quantizeAndPack(block->ff_w_up.weights, &block->ff_w_up.packed_weights, &block->ff_w_up.scale);
     block->ff_w_up.unpacked_weights = unpackWeights(block->ff_w_up.packed_weights, block->ff_w_up.scale, block->ff_w_up.weights->rows, block->ff_w_up.weights->columns);
@@ -988,9 +993,9 @@ transformer_block *createTransformerBlock(int input_size, int hidden_size, doubl
     block->ff_w_down.activation = linear;
     block->ff_w_down.weight_adam = createAdamState(block->ff_w_down.weights);
     block->ff_w_down.bias_adam = createAdamState(block->ff_w_down.biases);
-    double scale_down = 1.0 / sqrt(hidden_size);
+    float scale_down = 1.0f / sqrtf(hidden_size);
     for (int i = 0; i < hidden_size * input_size; i++) {
-        block->ff_w_down.weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale_down;
+        block->ff_w_down.weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale_down;
     }
     quantizeAndPack(block->ff_w_down.weights, &block->ff_w_down.packed_weights, &block->ff_w_down.scale);
     block->ff_w_down.unpacked_weights = unpackWeights(block->ff_w_down.packed_weights, block->ff_w_down.scale, block->ff_w_down.weights->rows, block->ff_w_down.weights->columns);
@@ -1097,11 +1102,11 @@ embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function,
 
     e->weight_adam = createAdamState(e->weights);
 
-    double scale = 1.0 / sqrt(embedding_dim);
+    float scale = 1.0f / sqrtf(embedding_dim);
 
     int i; // i
     for (i = 0; i < vocab_size * embedding_dim; i++) { // for loop
-        e->weights->data[i] = (((double)rand() / RAND_MAX) * 2.0 - 1.0) * scale; // randomizes dimensions
+        e->weights->data[i] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale; // randomizes dimensions
     }
 
     return e; // returns e
@@ -1127,7 +1132,7 @@ matrix *embeddingForward(embedding *e, int *token_ids, int seq_len) { // forward
         }
 
         for (j = 0; j < e->embedding_dim; j++) { // loop
-            double val = getVal(e->weights, token_id, j); // gets a vector
+            float val = getVal(e->weights, token_id, j); // gets a vector
             setVal(out, i, j, val); // puts it in an output
         }
     }
@@ -1135,7 +1140,7 @@ matrix *embeddingForward(embedding *e, int *token_ids, int seq_len) { // forward
     return out; // returns
 }
 
-void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_grad, double learning_rate) { // embedding backward with ADAM
+void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_grad, float learning_rate) { // embedding backward with ADAM
     // Create a gradient matrix with the embedding weights size
     matrix *weight_grad = newMatrix(e->vocab_size, e->embedding_dim); // starts filled with 0s
 
@@ -1145,7 +1150,7 @@ void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_
         if (token_id < 0 || token_id >= e->vocab_size) continue;
 
         for (j = 0; j < e->embedding_dim; j++) {
-            double grad = getVal(input_grad, i, j);
+            float grad = getVal(input_grad, i, j);
             setVal(weight_grad, token_id, j, grad);
         }
     }
@@ -1170,7 +1175,7 @@ typedef struct { // new struct!!!! transformer networksssss
     int num_blocks; // how many blocks
 } transformer_network; // alias
 
-transformer_network *createTransformerNetwork(int num_blocks, int input_size, int hidden_size, double (*activation)(double)) { // new function!!! takes the number of transformer blocks, input size,
+transformer_network *createTransformerNetwork(int num_blocks, int input_size, int hidden_size, float (*activation)(float)) { // new function!!! takes the number of transformer blocks, input size,
     if (num_blocks <= 0) return NULL; // if the number of blocks is less than 0, return null                                   // hidden size and an activation
 
     transformer_network *net = malloc(sizeof(transformer_network)); // allocates the network
@@ -1208,14 +1213,14 @@ matrix *transformerNetworkForward(matrix *input, transformer_network *net, trans
     return current; // returns current
 }
 
-double crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entropy loss. turns out the last one was incorrect or something idek im so tired
-    double loss = 0;
+float crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entropy loss. turns out the last one was incorrect or something idek im so tired
+    float loss = 0;
     int i;
 
     for (i = 0; i < predicted->rows; i++) { // math
         int target = target_tokens[i];
-        double prob = getVal(predicted, i, target);
-        loss += -log(prob + LN_EPSILON); // actual loss calculation
+        float prob = getVal(predicted, i, target);
+        loss += -logf(prob + LN_EPSILON); // actual loss calculation
     }
 
     loss = loss / predicted->rows; // Average loss over all predictions
@@ -1228,38 +1233,40 @@ void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *out
         int target = target_tokens[i]; // target
 
         for (j = 0; j < predicted->columns; j++) { // column loop
-            double prob = getVal(predicted, i, j); // probablility
+            float prob = getVal(predicted, i, j); // probablility
 
             if (j == target) // if ai got it right
-                setVal(output_grad, i, j, (prob - 1.0) / predicted->rows); // nudge it towards more confidence
+                setVal(output_grad, i, j, (prob - 1.0f) / predicted->rows); // nudge it towards more confidence
             else // else
-                setVal(output_grad, i, j, (prob - 0.0) / predicted->rows); // nudge it towards the right answer
+                setVal(output_grad, i, j, (prob - 0.0f) / predicted->rows); // nudge it towards the right answer
         }
     }
 }
 
-void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, matrix **Q_grad, matrix **K_grad, matrix **V_grad) { // backward for attention. rewritten because multi head
-    int seq_len = Q->rows; // sets up variables
+void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, matrix **Q_grad, matrix **K_grad, matrix **V_grad) {
+    int seq_len = Q->rows;
     int d_model = Q->columns;
     int head_dim = d_model / NUM_HEADS;
+    int kv_dim = head_dim * NUM_KV_GROUPS;
 
-    matrix *q_g = newMatrix(seq_len, d_model); // sets up gradients
-    matrix *k_g = newMatrix(seq_len, d_model);
-    matrix *v_g = newMatrix(seq_len, d_model);
+    matrix *q_g = newMatrix(seq_len, d_model);
+    matrix *k_g = newMatrix(seq_len, kv_dim); // kv
+    matrix *v_g = newMatrix(seq_len, kv_dim);
 
-    int h, i, j, k;
-
+    int h, i, j;
     for (h = 0; h < NUM_HEADS; h++) {
-        int offset = h * head_dim;
+        int kv_group = h / (NUM_HEADS / NUM_KV_GROUPS);
+        int q_offset = h * head_dim;
+        int kv_offset = kv_group * head_dim;
 
         // Recalculate softmax scores for this head
         matrix *S = newMatrix(seq_len, seq_len);
-        double scale = 1.0 / sqrt(head_dim);
+        float scale = 1.0f / sqrtf(head_dim);
         for (i = 0; i < seq_len; i++) {
             for (j = 0; j < seq_len; j++) {
-                double dot = 0.0;
-                for (k = 0; k < head_dim; k++) {
-                    dot += getVal(Q, i, offset + k) * getVal(K, j, offset + k);
+                float dot = 0.0f;
+                for (int d = 0; d < head_dim; d++) {
+                    dot += getVal(Q, i, q_offset + d) * getVal(K, j, kv_offset + d);
                 }
                 setVal(S, i, j, dot * scale);
             }
@@ -1267,19 +1274,20 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
         // Apply causal mask
         for (i = 0; i < seq_len; i++) {
             for (j = 0; j < seq_len; j++) {
-                if (j > i) setVal(S, i, j, -10000.0);
+                if (j > i) setVal(S, i, j, -10000.0f);
             }
         }
         softmax(S);
 
-        // V_grad for this head
+        // V_grad (Accumulate into v_g)
         for (i = 0; i < seq_len; i++) {
-            for (k = 0; k < head_dim; k++) {
-                double val = 0.0;
+            for (int d = 0; d < head_dim; d++) {
+                float val = 0.0f;
                 for (j = 0; j < seq_len; j++) {
-                    val += getVal(S, j, i) * getVal(attn_out_grad, j, offset + k);
+                    val += getVal(S, j, i) * getVal(attn_out_grad, j, q_offset + d);
                 }
-                setVal(v_g, i, offset + k, val);
+                float existing = getVal(v_g, i, kv_offset + d);
+                setVal(v_g, i, kv_offset + d, existing + val); // accumulate
             }
         }
 
@@ -1287,9 +1295,9 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
         matrix *s_g = newMatrix(seq_len, seq_len);
         for (i = 0; i < seq_len; i++) {
             for (j = 0; j < seq_len; j++) {
-                double val = 0.0;
-                for (k = 0; k < head_dim; k++) {
-                    val += getVal(attn_out_grad, i, offset + k) * getVal(V, j, offset + k);
+                float val = 0.0f;
+                for (int d = 0; d < head_dim; d++) {
+                    val += getVal(attn_out_grad, i, q_offset + d) * getVal(V, j, kv_offset + d);
                 }
                 setVal(s_g, i, j, val);
             }
@@ -1297,13 +1305,13 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
 
         // Softmax backward
         for (i = 0; i < seq_len; i++) {
-            double dot = 0.0;
+            float dot = 0.0f;
             for (j = 0; j < seq_len; j++) {
                 dot += getVal(S, i, j) * getVal(s_g, i, j);
             }
             for (j = 0; j < seq_len; j++) {
-                double s_val = getVal(S, i, j);
-                double sg_val = getVal(s_g, i, j);
+                float s_val = getVal(S, i, j);
+                float sg_val = getVal(s_g, i, j);
                 setVal(s_g, i, j, s_val * (sg_val - dot));
             }
         }
@@ -1311,28 +1319,38 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
         // Scale backward
         for (i = 0; i < seq_len * seq_len; i++) s_g->data[i] *= scale;
 
-        // Q_grad and K_grad
+        // Q_grad (Accumulate into q_g)
         for (i = 0; i < seq_len; i++) {
-            for (k = 0; k < head_dim; k++) {
-                double q_val = 0.0;
-                double k_val = 0.0;
+            for (int d = 0; d < head_dim; d++) {
+                float val = 0.0f;
                 for (j = 0; j < seq_len; j++) {
-                    q_val += getVal(s_g, i, j) * getVal(K, j, offset + k);
-                    k_val += getVal(s_g, j, i) * getVal(Q, i, offset + k);
+                    val += getVal(s_g, i, j) * getVal(K, j, kv_offset + d);
                 }
-                setVal(q_g, i, offset + k, q_val);
-                setVal(k_g, i, offset + k, k_val);
+                float existing = getVal(q_g, i, q_offset + d);
+                setVal(q_g, i, q_offset + d, existing + val); // ACCUMULATE
             }
         }
 
-        freeMatrix(S); // frees
+        // K_grad (Accumulate into k_g)
+        for (i = 0; i < seq_len; i++) {
+            for (int d = 0; d < head_dim; d++) {
+                float val = 0.0f;
+                for (j = 0; j < seq_len; j++) {
+                    val += getVal(s_g, j, i) * getVal(Q, i, q_offset + d);
+                }
+                float existing = getVal(k_g, i, kv_offset + d);
+                setVal(k_g, i, kv_offset + d, existing + val); // ACCUMULATE
+            }
+        }
+
+        freeMatrix(S);
         freeMatrix(s_g);
     }
 
-    applyRoPE(q_g, seq_len, d_model, 1); // unrotate before passing over the gradients
-    applyRoPE(k_g, seq_len, d_model, 1);
+    applyRoPE(q_g, seq_len, d_model, 1);
+    applyRoPE(k_g, seq_len, kv_dim, 1); // Keys are now kv_dim!
 
-    *Q_grad = q_g; // sets the gradients
+    *Q_grad = q_g;
     *K_grad = k_g;
     *V_grad = v_g;
 }
@@ -1343,21 +1361,21 @@ matrix *layerNormBackward(matrix *grad_out, matrix *normalized_out) { // layer n
     int N = grad_out->columns; // number of features
 
     for (i = 0; i < grad_out->rows; i++) { // loop
-        double sum_grad = 0.0;
-        double sum_grad_y = 0.0; // variables
+        float sum_grad = 0.0f;
+        float sum_grad_y = 0.0f; // variables
 
         for (j = 0; j < N; j++) { // sums
-            double dy = getVal(grad_out, i, j);
-            double y = getVal(normalized_out, i, j);
+            float dy = getVal(grad_out, i, j);
+            float y = getVal(normalized_out, i, j);
             sum_grad += dy;
             sum_grad_y += dy * y; // The moon is made of used coffee pucks
         }
 
         // Calculate final dx
         for (j = 0; j < N; j++) {
-            double dy = getVal(grad_out, i, j);
-            double y = getVal(normalized_out, i, j);
-            double dx = (1.0 / N) * (dy - sum_grad / N - y * sum_grad_y / N);
+            float dy = getVal(grad_out, i, j);
+            float y = getVal(normalized_out, i, j);
+            float dx = (1.0f / N) * (dy - sum_grad / N - y * sum_grad_y / N);
             setVal(grad_in, i, j, dx);
         }
     }
@@ -1370,30 +1388,30 @@ matrix *rmsNormBackward(matrix *grad_out, matrix *normalized_out) { // backward 
     int N = grad_out->columns; // N
 
     for (i = 0; i < grad_out->rows; i++) {
-        double ms = 0.0; // Calculate the RMS of the normalized output
+        float ms = 0.0f; // Calculate the RMS of the normalized output
         for (j = 0; j < N; j++) {
-            double y = getVal(normalized_out, i, j);
+            float y = getVal(normalized_out, i, j);
             ms += y * y;
         }
         ms /= N;
-        double rms_inv = 1.0 / sqrt(ms + LN_EPSILON); // do not delete the epsilon
+        float rms_inv = 1.0f / sqrtf(ms + LN_EPSILON); // do not delete the epsilon
 
-        double dot = 0.0; // Calculate dot product of grad_out and normalized_out
+        float dot = 0.0f; // Calculate dot product of grad_out and normalized_out
         for (j = 0; j < N; j++) {
             dot += getVal(grad_out, i, j) * getVal(normalized_out, i, j);
         }
 
         for (j = 0; j < N; j++) { // 3. Final gradient
-            double dy = getVal(grad_out, i, j);
-            double y = getVal(normalized_out, i, j);
-            double dx = rms_inv * (dy - y * dot / N);
+            float dy = getVal(grad_out, i, j);
+            float y = getVal(normalized_out, i, j);
+            float dx = rms_inv * (dy - y * dot / N);
             setVal(grad_in, i, j, dx);
         }
     }
     return grad_in; // returns
 }
 
-matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, double learning_rate) { // transformer backward function. does a bunch of super esoteric math
+matrix *transformerBackward(transformer_block *block, transformer_cache *cache, matrix *output_grad, float learning_rate) { // transformer backward function. does a bunch of super esoteric math
     matrix *ff_out_grad = output_grad; // Backward through ff_w_down
     matrix *prod_grad = backward(&block->ff_w_down, cache->prod, ff_out_grad, learning_rate, cache->preact_ff);
 
@@ -1403,7 +1421,7 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(prod_grad);
 
     for (int i = 0; i < gate_grad->rows * gate_grad->columns; i++) { // Backward through SiLU
-        double preact_val = cache->preact_gate->data[i]; // gate = silu(preact_gate) => d(preact_gate) = d(gate) * silu_derivative(preact_gate)
+        float preact_val = cache->preact_gate->data[i]; // gate = silu(preact_gate) => d(preact_gate) = d(gate) * silu_derivative(preact_gate)
         gate_grad->data[i] *= silu_derivative(preact_val);
     }
 
