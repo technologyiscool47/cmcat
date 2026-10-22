@@ -50,6 +50,18 @@ int main() {
         quantizeAndPack(net->blocks[i]->ff_w_down.weights, &net->blocks[i]->ff_w_down.packed_weights, &net->blocks[i]->ff_w_down.scale);
     }
 
+    // allocates KV caches for each block
+    int head_dim = d_model / NUM_HEADS;
+    int kv_dim = head_dim * NUM_KV_GROUPS;
+
+    kv_cache **kv_caches = malloc(net->num_blocks * sizeof(kv_cache *)); // allocates
+    for (int i = 0; i < net->num_blocks; i++) { // i
+        kv_caches[i] = malloc(sizeof(kv_cache)); // allocates
+        kv_caches[i]->K = newPersistentMatrix(MAX_CONTEXT, kv_dim); // matrices
+        kv_caches[i]->V = newPersistentMatrix(MAX_CONTEXT, kv_dim);
+        kv_caches[i]->len = 0; // len
+    }
+
     const char *prompt = "The GNU Affero General"; // generation
     long prompt_len;
     int *tokens = tokenize(prompt, &prompt_len, merges_a, merges_b, num_merges);
@@ -70,20 +82,52 @@ int main() {
     initArena();
     for (int step = 0; step < 50; step++) {
         resetArena();
-        matrix *embed_out = embeddingForward(embed, input_tokens, seq_len); // forward pass (which i HATE)
 
-        transformer_cache **caches = malloc(net->num_blocks * sizeof(transformer_cache *));
-        matrix *net_out = transformerNetworkForward(embed_out, net, caches);
-        matrix *logits = unembeddingForward(net_out, &unembed);
+        matrix *logits;
+        matrix *net_out;
+        int current_token;
 
-        // --- SAMPLING (Instead of Argmax) ---
-        float r = (float)rand() / RAND_MAX; // Roll a dice between 0 and 1
-        float cumulative_prob = 0.0f;
-        int best_token = 0; // Fallback
+        if (step == 0) {
+            // Prompt pass
+            matrix *embed_out = embeddingForward(embed, input_tokens, seq_len);
+            transformer_cache **caches = malloc(net->num_blocks * sizeof(transformer_cache *));
+            net_out = transformerNetworkForward(embed_out, net, caches);
+            logits = unembeddingForward(net_out, &unembed);
 
-        // Walk through the probabilities until we hit our random number
+            // Copy K and V into the persistent KV Cache
+            for (int b = 0; b < net->num_blocks; b++) {
+                for (int r = 0; r < seq_len; r++) {
+                    for (int c = 0; c < kv_dim; c++) {
+                        kv_caches[b]->K->data[r * kv_dim + c] = caches[b]->K->data[r * kv_dim + c];
+                        kv_caches[b]->V->data[r * kv_dim + c] = caches[b]->V->data[r * kv_dim + c];
+                    }
+                }
+                kv_caches[b]->len = seq_len;
+            }
+
+            // Cleanup prompt pass
+            freeMatrix(embed_out);
+            for (int b = 0; b < net->num_blocks; b++) freeTransformerCache(caches[b]);
+            free(caches);
+        } else {
+            // Generation pass
+            current_token = input_tokens[seq_len - 1]; // The token generated in the previous step
+
+            int single_token[1] = {current_token};
+            matrix *embed_out = embeddingForward(embed, single_token, 1);
+
+            net_out = transformerNetworkForwardStep(embed_out, net, kv_caches);
+            logits = unembeddingForward(net_out, &unembed);
+
+        }
+
+        // Sampling
+        double r = (double)rand() / RAND_MAX;
+        double cumulative_prob = 0.0;
+        int best_token = 0;
+
         for (int j = 0; j < vocab_size; j++) {
-            cumulative_prob += getVal(logits, seq_len - 1, j);
+            cumulative_prob += getVal(logits, 0, j);
             if (r <= cumulative_prob) {
                 best_token = j;
                 break;
@@ -98,16 +142,13 @@ int main() {
         text_buf[buf_idx] = '\0'; // Null terminate
         printf("%s\n", text_buf);
 
-        for (int i = 0; i < seq_len - 1; i++) { // shifts array to the left
+        // Shift the array
+        for (int i = 0; i < seq_len - 1; i++) {
             input_tokens[i] = input_tokens[i + 1];
         }
         input_tokens[seq_len - 1] = best_token;
 
-        freeMatrix(embed_out); // DOWNLOAD FREE RAM
-        for (int i = 0; i < net->num_blocks; i++) {
-            freeTransformerCache(caches[i]);
-        }
-        free(caches);
         freeMatrix(logits);
+        freeMatrix(net_out);
     }
 }

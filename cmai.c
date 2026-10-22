@@ -26,7 +26,8 @@
 #include <omp.h> // for multi threading
 
 #define LN_EPSILON 1e-5f // super small number. is used later on
-#define NUM_KV_GROUPS 2 // kv gropus
+#define NUM_KV_GROUPS 2 // kv groups
+#define MAX_CONTEXT 256 // Maximum tokens the kv cache can hold
 #define NUM_HEADS 8 // Spiders usually have 4 pairs of eyes, having 8 eyes in total. This line declares 8 heads for multi head attention. Attention heads are like eyes.
                     // Does that mean that cmcat is a spider? Let's find out! Usinfg advanced analysis, it has become clear that me, technologyiscool47 is scared of
                     // spiders. However, I am not scared of cmcat which means that spiders and this project are not the same thing.
@@ -325,6 +326,13 @@ void adamUpdate(matrix *weights, matrix *grads, adam_state *state, float lr) { /
         weights->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps);
     }
 }
+
+typedef struct {
+    matrix *K; // Persistent cache for K
+    matrix *V; // Persistent cache for V
+    int len; // How many tokens are currently in the cache
+} kv_cache;
+
 
 /* --------------------------------------------- *\
    | Layers and other stuff on top of matrices |
@@ -748,23 +756,24 @@ void softmax(matrix *m) { // soft max function. takes a matrix
     }
 }
 
-void applyRoPE(matrix *x, int seq_len, int d_model, int is_backward) { // apply rotary positional encoding
+void applyRoPE(matrix *x, int seq_len, int d_model, int is_backward, int start_pos) { // apply rotary positional encoding
     int head_dim = d_model / NUM_HEADS; // head dimensions
     int half = head_dim / 2; // half of head dimensions
 
     for (int m = 0; m < seq_len; m++) { // loops
+        int current_pos = m + start_pos; // absolute position
         for (int h = 0; h < NUM_HEADS; h++) { // loops
             int offset = h * head_dim; // sets the offset to loop 2 by head dimensiions
 
             for (int i = 0; i < half; i++) { // loops through the half
                 float freq = 1.0f / powf(10000.0f, (2.0f * i) / head_dim); // The frequency for this specific dimension pair
-                float angle = m * freq; // angle
+                float angle = current_pos * freq; // angle
 
                 // In the backward pass, rotate by the inverse angle
                 if (is_backward) angle = -angle; // if this is use in backward invert angle
 
-                float cos_val = cosf(angle); // cosf of angle
-                float sin_val = sinf(angle); // sinf of angle
+                float cos_val = cosf(angle);
+                float sin_val = sinf(angle);
 
                 int idx1 = m * d_model + offset + i; // index 1
                 int idx2 = m * d_model + offset + i + half; // index 1 + half
@@ -786,8 +795,8 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // Multi-Head
     int head_dim = d_model / NUM_HEADS; // dimensions per head
     int kv_dim = head_dim * NUM_KV_GROUPS; // kv dimensions
 
-    applyRoPE(queries, seq_len, d_model, 0);
-    applyRoPE(keys, seq_len, kv_dim, 0); // kv
+    applyRoPE(queries, seq_len, d_model, 0, 0);
+    applyRoPE(keys, seq_len, kv_dim, 0, 0); // kv
 
     matrix *final_output = newMatrix(seq_len, d_model); // final output matrix
 
@@ -1347,8 +1356,8 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
         freeMatrix(s_g);
     }
 
-    applyRoPE(q_g, seq_len, d_model, 1);
-    applyRoPE(k_g, seq_len, kv_dim, 1); // Keys are now kv_dim!
+    applyRoPE(q_g, seq_len, d_model, 1, 0);
+    applyRoPE(k_g, seq_len, kv_dim, 1, 0); // Keys are now kv_dim!
 
     *Q_grad = q_g;
     *K_grad = k_g;
@@ -1473,4 +1482,108 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(input_grad_part2);
 
     return final_input_grad;
+}
+
+matrix *transformerForwardStep(matrix *input, transformer_block *block, kv_cache *kv) { // forward step
+    int d_model = input->columns; // mere integers
+    int kv_dim = block->wk.weights->columns;
+
+    matrix *norm1 = rmsNorm(input); // RMSNorm
+
+    matrix *preact_q = newMatrix(1, block->wq.weights->columns); // qkv projections
+    matrix *Q = forward(&block->wq, norm1, preact_q);
+
+    matrix *preact_k = newMatrix(1, kv_dim);
+    matrix *K_new = forward(&block->wk, norm1, preact_k);
+
+    matrix *preact_v = newMatrix(1, kv_dim);
+    matrix *V_new = forward(&block->wv, norm1, preact_v);
+
+
+    applyRoPE(Q, 1, d_model, 0, kv->len);// Apply rope
+    applyRoPE(K_new, 1, kv_dim, 0, kv->len);
+
+
+    for (int c = 0; c < kv_dim; c++) { // update kv cache
+        kv->K->data[kv->len * kv_dim + c] = K_new->data[c];
+        kv->V->data[kv->len * kv_dim + c] = V_new->data[c];
+    }
+    kv->len++;
+    int cache_len = kv->len;
+
+    int head_dim = d_model / NUM_HEADS; // Attention
+    matrix *attn_out = newMatrix(1, d_model);
+    float scale = 1.0f / sqrtf(head_dim);
+
+    for (int h = 0; h < NUM_HEADS; h++) {
+        int kv_group = h / (NUM_HEADS / NUM_KV_GROUPS);
+        int q_offset = h * head_dim;
+        int kv_offset = kv_group * head_dim;
+
+        matrix *scores = newMatrix(1, cache_len);
+        for (int j = 0; j < cache_len; j++) {
+            float dot = 0.0f;
+            for (int d = 0; d < head_dim; d++) {
+                float q_val = getVal(Q, 0, q_offset + d);
+                float k_val = getVal(kv->K, j, kv_offset + d);
+                dot += q_val * k_val;
+            }
+            setVal(scores, 0, j, dot * scale);
+        }
+
+        softmax(scores); // softmax
+
+        for (int d = 0; d < head_dim; d++) {
+            float val = 0.0f;
+            for (int j = 0; j < cache_len; j++) {
+                val += getVal(scores, 0, j) * getVal(kv->V, j, kv_offset + d);
+            }
+            setVal(attn_out, 0, q_offset + d, val);
+        }
+        freeMatrix(scores);
+    }
+
+    matrix *preact_o = newMatrix(1, block->wo.weights->columns); // output projection
+    matrix *proj_out = forward(&block->wo, attn_out, preact_o);
+
+    matrix *after_attn = addMatrix(input, proj_out); // residual add
+    freeMatrix(proj_out);
+
+    matrix *norm2 = rmsNorm(after_attn); // swiglu
+    matrix *preact_gate = newMatrix(1, block->ff_w_gate.weights->columns);
+    matrix *gate = forward(&block->ff_w_gate, norm2, preact_gate);
+    for (int i = 0; i < gate->rows * gate->columns; i++) gate->data[i] = silu(gate->data[i]);
+
+    matrix *preact_up = newMatrix(1, block->ff_w_up.weights->columns);
+    matrix *up = forward(&block->ff_w_up, norm2, preact_up);
+
+    matrix *prod = multiplyElementWise(gate, up);
+    matrix *preact_ff = newMatrix(1, block->ff_w_down.weights->columns);
+    matrix *ff_out = forward(&block->ff_w_down, prod, preact_ff);
+
+    matrix *output = addMatrix(after_attn, ff_out); // 9. Final Residual
+
+    // Cleanup
+    freeMatrix(norm1);
+    freeMatrix(preact_q); freeMatrix(Q);
+    freeMatrix(preact_k); freeMatrix(K_new);
+    freeMatrix(preact_v); freeMatrix(V_new);
+    freeMatrix(attn_out);
+    freeMatrix(preact_o);
+    freeMatrix(after_attn);
+    freeMatrix(norm2);
+    freeMatrix(preact_gate); freeMatrix(gate);
+    freeMatrix(preact_up); freeMatrix(up);
+    freeMatrix(prod);
+    freeMatrix(preact_ff); freeMatrix(ff_out);
+
+    return output; // returns
+}
+
+matrix *transformerNetworkForwardStep(matrix *input, transformer_network *net, kv_cache **kv_caches) { /* 💀️ */
+    matrix *current = input;
+    for (int i = 0; i < net->num_blocks; i++) {
+        current = transformerForwardStep(current, net->blocks[i], kv_caches[i]);
+    }
+    return current;
 }
