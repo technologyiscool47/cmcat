@@ -62,7 +62,7 @@ int main() {
         kv_caches[i]->len = 0; // len
     }
 
-    const char *prompt = "The GNU Affero General"; // generation
+    const char *prompt = "Once upon a time, "; // generation
     long prompt_len;
     int *tokens = tokenize(prompt, &prompt_len, merges_a, merges_b, num_merges);
 

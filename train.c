@@ -23,10 +23,10 @@
 int main(){ // main training loop. as of now train.c is mostly a test, it isnt what i want it to be yet. wait patiently
     // omp_set_num_threads(omp_get_num_procs());
     int merges_a[2000], merges_b[2000]; int num_merges; // tokenization. this sets up the merges
-    trainBPE("LICENSE", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on the license
+    trainBPE("tinystories_0.5mb.txt", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on file
     saveBPE("tokenizer.bin", merges_a, merges_b, num_merges); // saves bpe
 
-    int vocab_size = 256 + num_merges, d_model = 64, num_blocks = 2, hidden_size = 64, seq_len = 16, stops = 20000; // training variables and parameters
+    int vocab_size = 256 + num_merges, d_model = 64, num_blocks = 2, hidden_size = 64, seq_len = 16, stops = 50000; // training variables and parameters
     float learning_rate = 0.001; // also a training variable
     srand(47);
 
@@ -52,7 +52,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     unembed.unpacked_weights = unpackWeights(unembed.packed_weights, unembed.scale, unembed.weights->rows, unembed.weights->columns);
 
     long file_size; // tokenization. time to set up bpe
-    unsigned char *text_bytes = readFileToBytes("LICENSE", &file_size); // Read the file to bytes
+    unsigned char *text_bytes = readFileToBytes("tinystories_0.5mb.txt", &file_size); // Read the file to bytes
 
     long total_tokens;
     int *text_tokens = tokenize((const char*)text_bytes, &total_tokens, merges_a, merges_b, num_merges); // Tokenize the text!
@@ -64,9 +64,10 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     int target_tokens[seq_len];
 
     initArena();
+    float loss_sum = 0.0f;
     for (int stop = 0; stop < stops; stop++) { // the main training cycle loop
         resetArena();
-        // Pick a random starting point in the license
+        // Pick a random starting point in the file
         int start = rand() % (total_tokens - seq_len - 1);
 
         // Grab our input sequence and our target sequence (shifted by 1)
@@ -83,8 +84,10 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
 
         float loss = crossEntropyLoss(logits, target_tokens); // That one ctrl alt delete comic
 
+        loss_sum += loss;
         if (stop % 100 == 0) {
-            printf("stop %d - loss: %.6f\n", stop, loss); // prints Loss
+            printf("stop %d - avg loss (last 100): %.4f\n", stop, loss_sum / 100.0f); // prints Loss
+            loss_sum = 0.0f;
         }
 
         matrix *output_grad = newMatrix(logits->rows, logits->columns); // backprop time. output gradient

@@ -192,7 +192,7 @@ matrix *addMatrix(matrix *a, matrix *b) { // creates a function called addMatrix
 matrix *transposeMatrix(matrix *m) { // makes a function called transposeMatrix, takes a matrix pointer
     matrix *result = newMatrix(m->columns, m->rows); // makes a matrix called result, takes makes m's columns its rows and likewise for m's rows
 
-    // #pragma omp parallel for schedule(static) // instruction for compiler to run this on multiple threads
+    #pragma omp parallel for schedule(static) // instruction for compiler to run this on multiple threads
     for (int i = 0; i < m->rows; i++) { // loop
         for (int j = 0; j < m->columns; j++) { // loop
             result->data[j * m->rows + i] = m->data[i * m->columns + j]; // sets the value at j,i to the value at i, j
@@ -205,14 +205,13 @@ matrix *multiplyMatrix(matrix *a, matrix *b) { // takes 2 matrices
     if (a->columns != b->rows) return NULL; // if a's columns aren't b's rows, return null
     matrix *result = newMatrix(a->rows, b->columns); // makes a result matrix
 
-    // #pragma omp parallel for schedule(static) // super important instruction for multi thread
-    for (int i = 0; i < a->rows; i++) { // loop
-        for (int j = 0; j < b->columns; j++) { // loop
-            float sum = 0.0f; // sum
-            for (int k = 0; k < a->columns; k++) { // loop
-                sum += a->data[i * a->columns + k] * b->data[k * b->columns + j]; // math of mystery and evil
+    #pragma omp parallel for schedule(static) // mega important multi threading instruction
+    for (int i = 0; i < a->rows; i++) { // loops
+        for (int k = 0; k < a->columns; k++) { // loops
+            float a_val = a->data[i * a->columns + k]; // math
+            for (int j = 0; j < b->columns; j++) {
+                result->data[i * b->columns + j] += a_val * b->data[k * b->columns + j];
             }
-            result->data[i * b->columns + j] = sum; // makes the result
         }
     }
     return result; // returns the result
@@ -257,17 +256,13 @@ int get2BitValue(float weight, float threshold) { // Maps a ternary value to a 2
 
 void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, float *scale) {
     int total_weights = float_weights->rows * float_weights->columns;
-
-
-    float absmax = 0.0f;
+    float abs_sum = 0.0f;
     for (int i = 0; i < total_weights; i++) { // Find the absolute maximum to use as our scale
-        if (fabsf(float_weights->data[i]) > absmax) { // if this is the maximum value ive foudn so far
-            absmax = fabsf(float_weights->data[i]); // set the value to be the maximum
-        }
+        abs_sum += fabsf(float_weights->data[i]); // set the value to be the maximum
     }
-    *scale = absmax; // scale
+    *scale = abs_sum/total_weights; // scale
 
-    float threshold = absmax * 0.4f; // BitNet uses 40% of absmax
+    float threshold = 0.5 * (*scale); // BitNet uses 40% of absmax
 
     int packed_size = (total_weights + 3) / 4;
 
@@ -315,15 +310,18 @@ void adamUpdate(matrix *weights, matrix *grads, adam_state *state, float lr) { /
     state->t++; // increments timestep
     float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f; //  beta 1, beta 2 and epsilon but different
 
-    for (int i = 0; i < weights->rows * weights->columns; i++) { // loop
-        float g = grads->data[i]; // maths that i will not comment on
-        state->m->data[i] = beta1 * state->m->data[i] + (1.0f - beta1) * g;
+    float bias1 = 1.0f - powf(beta1, state->t);
+    float bias2 = 1.0f - powf(beta2, state->t);
+
+    for (int i = 0; i < weights->rows * weights->columns; i++) { // adam update of mystery. powf no more
+        float g = grads->data[i];
+        state->m->data[i] = beta1 * state->m->data[i] + (1.0f - beta1) * g; // math
         state->v->data[i] = beta2 * state->v->data[i] + (1.0f - beta2) * g * g;
 
-        float m_hat = state->m->data[i] / (1.0f - powf(beta1, state->t));
-        float v_hat = state->v->data[i] / (1.0f - powf(beta2, state->t));
+        float m_hat = state->m->data[i] / bias1;
+        float v_hat = state->v->data[i] / bias2;
 
-        weights->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps);
+        weights->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps); // updates
     }
 }
 
@@ -372,27 +370,25 @@ matrix *unpackWeights(uint8_t *packed_weights, float scale, int rows, int cols) 
 
 matrix *ternaryMultiplyMatrix(matrix *input, uint8_t *packed_weights, float scale, int weight_rows, int weight_cols) { // matrix multiplication but ternary and fast and very cmcat
     matrix *result = newMatrix(input->rows, weight_cols); // result matrix
+    #pragma omp parallel for schedule(static) // multi threading
+    for (int i = 0; i < input->rows; i++) { // loops
+        for (int k = 0; k < input->columns; k++) { // loops
+            float input_val = input->data[i * input->columns + k]; // math of mystery, evil and esotericy
 
-    // #pragma omp parallel for schedule(static) // super mega important multi thread instruction
-    for (int i = 0; i < input->rows; i++) { // loops through input rows and weight columns
-        for (int j = 0; j < weight_cols; j++) {
-            float sum = 0.0f; // sum
-            for (int k = 0; k < input->columns; k++) { // loops through input columns
-                int weight_idx = k * weight_cols + j; // unpacks
+            for (int j = 0; j < weight_cols; j++) {
+                int weight_idx = k * weight_cols + j;
                 int byte_idx = weight_idx >> 2;
                 int bit_offset = 6 - ((weight_idx & 3) << 1);
                 uint8_t two_bit = (packed_weights[byte_idx] >> bit_offset) & 0x03;
 
-                if (two_bit == 2) { // add or subtract, no multiplication. this is literally what makes ternary weight (bitnet 1.58) models so fast
-                    sum += input->data[i * input->columns + k];
-                } else if (two_bit == 0) {
-                    sum -= input->data[i * input->columns + k];
-                }
+                if (two_bit == 2) result->data[i * weight_cols + j] += input_val;
+                else if (two_bit == 0) result->data[i * weight_cols + j] -= input_val;
             }
-            result->data[i * weight_cols + j] = sum * scale; // Multiply by the layer scale
         }
     }
-    return result;
+    int total = input->rows * weight_cols;
+    for (int i = 0; i < total; i++) result->data[i] *= scale;
+    return result; // returns
 }
 
 matrix *forward(layer *l, matrix *input, matrix *preact_out) { // i HATE forward passes
@@ -513,12 +509,12 @@ matrix *backward(layer *l, matrix *input, matrix *output_grad, float learning_ra
     matrix *weights_t = transposeMatrix(l->unpacked_weights); // Compute input gradient using cache
     matrix *input_grad = multiplyMatrix(activation_grad, weights_t);
 
-    float absmax = 0.0f; // Re quantize in place (super mega faster than previously)
-    for (int i = 0; i < total; i++) { // no comment
-        if (fabsf(l->weights->data[i]) > absmax) absmax = fabsf(l->weights->data[i]);
+    float abs_sum = 0.0f; // Re quantize in place (super mega faster than previously)
+    for (int i = 0; i < total; i++) {
+        abs_sum += fabsf(l->weights->data[i]);
     }
-    l->scale = absmax;
-    float threshold = absmax * 0.4f;
+    l->scale = abs_sum / total;
+    float threshold = 0.5f * l->scale;
     int packed_size = (total + 3) / 4;
 
     for (int i = 0; i < packed_size; i++) {
@@ -760,13 +756,17 @@ void applyRoPE(matrix *x, int seq_len, int d_model, int is_backward, int start_p
     int head_dim = d_model / NUM_HEADS; // head dimensions
     int half = head_dim / 2; // half of head dimensions
 
+    float freqs[half];
+    for (int i = 0; i < half; i++)
+        freqs[i] = 1.0f / powf(10000.0f, (2.0f * i) / head_dim);
+
     for (int m = 0; m < seq_len; m++) { // loops
         int current_pos = m + start_pos; // absolute position
         for (int h = 0; h < NUM_HEADS; h++) { // loops
             int offset = h * head_dim; // sets the offset to loop 2 by head dimensiions
 
             for (int i = 0; i < half; i++) { // loops through the half
-                float freq = 1.0f / powf(10000.0f, (2.0f * i) / head_dim); // The frequency for this specific dimension pair
+                float freq = freqs[i]; // The frequency for this specific dimension pair
                 float angle = current_pos * freq; // angle
 
                 // In the backward pass, rotate by the inverse angle
@@ -1160,7 +1160,8 @@ void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_
 
         for (j = 0; j < e->embedding_dim; j++) {
             float grad = getVal(input_grad, i, j);
-            setVal(weight_grad, token_id, j, grad);
+            float existing = getVal(weight_grad, token_id, j);
+            setVal(weight_grad, token_id, j, existing + grad);
         }
     }
 
@@ -1345,7 +1346,7 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
             for (int d = 0; d < head_dim; d++) {
                 float val = 0.0f;
                 for (j = 0; j < seq_len; j++) {
-                    val += getVal(s_g, j, i) * getVal(Q, i, q_offset + d);
+                    val += getVal(s_g, j, i) * getVal(Q, j, q_offset + d);
                 }
                 float existing = getVal(k_g, i, kv_offset + d);
                 setVal(k_g, i, kv_offset + d, existing + val); // ACCUMULATE
@@ -1391,7 +1392,7 @@ matrix *layerNormBackward(matrix *grad_out, matrix *normalized_out) { // layer n
     return grad_in; // yay
 }
 
-matrix *rmsNormBackward(matrix *grad_out, matrix *normalized_out) { // backward for rmsnorm
+matrix *rmsNormBackward(matrix *grad_out, matrix *normalized_out, matrix *original_input) { // backward for rmsnorm
     matrix *grad_in = newMatrix(grad_out->rows, grad_out->columns); // grad in
     int i, j; // loop variablesdd
     int N = grad_out->columns; // N
@@ -1399,7 +1400,7 @@ matrix *rmsNormBackward(matrix *grad_out, matrix *normalized_out) { // backward 
     for (i = 0; i < grad_out->rows; i++) {
         float ms = 0.0f; // Calculate the RMS of the normalized output
         for (j = 0; j < N; j++) {
-            float y = getVal(normalized_out, i, j);
+            float y = getVal(original_input, i, j);
             ms += y * y;
         }
         ms /= N;
@@ -1444,7 +1445,7 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(norm2_grad_from_gate);
     freeMatrix(norm2_grad_from_up);
 
-    matrix *after_attn_grad_from_ff = rmsNormBackward(norm2_out_grad, cache->norm2); // rmsnorm backward
+    matrix *after_attn_grad_from_ff = rmsNormBackward(norm2_out_grad, cache->norm2, cache->after_attn); // rmsnorm backward
     freeMatrix(norm2_out_grad); // Free the intermediate gradient
 
     matrix *after_attn_grad = addMatrix(output_grad, after_attn_grad_from_ff); // "residual split" for after attn
@@ -1473,7 +1474,7 @@ matrix *transformerBackward(transformer_block *block, transformer_cache *cache, 
     freeMatrix(norm1_grad_v);
     freeMatrix(norm1_grad_tmp);
 
-    matrix *input_grad_part2 = rmsNormBackward(norm1_grad, cache->norm1); // rmsnorm backward
+    matrix *input_grad_part2 = rmsNormBackward(norm1_grad, cache->norm1, cache->input); // rmsnorm backward
     freeMatrix(norm1_grad);
 
     matrix *final_input_grad = addMatrix(after_attn_grad, input_grad_part2); // final residual addition
