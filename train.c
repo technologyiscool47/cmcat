@@ -1,15 +1,15 @@
 /*
  * cmcat - local llm, from scratch, in C.
- * Copyright (C) 2026 technologfyiscool47
+ * Copyright (C) 2026 technologyiscool47
  *
  * This program is free software (both as in free beer and as in freedom):
  * you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
  *
- * Commercial licensinfg is available. technologfyiscool47 is active on the following platforms:
- * - Neocities (https://technologfyiscool47.neocities.com)
- * - GitHub (https://github.com/technologfyiscool47)
- * - E-mail (technologfyiscool47@gmail.com)
+ * Commercial licensing is available. technologyiscool47 is active on the following platforms:
+ * - Neocities (https://technologyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologyiscool47)
+ * - E-mail (technologyiscool47@gmail.com)
  * Contact the author for details.
  *
  * This program is distributed in the hope that it will be useful,
@@ -26,7 +26,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     trainBPE("tinystories_0.5mb.txt", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on file
     saveBPE("tokenizer.bin", merges_a, merges_b, num_merges); // saves bpe
 
-    int vocab_size = 256 + num_merges, d_model = 64, num_blocks = 2, hidden_size = 64, seq_len = 16, stops = 50000; // training variables and parameters
+    int vocab_size = 256 + num_merges, d_model = 128, num_blocks = 3, hidden_size = 256, seq_len = 16, stops = 20000; // training variables and parameters
     float learning_rate = 0.001; // also a training variable
     srand(47);
 

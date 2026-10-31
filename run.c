@@ -1,15 +1,15 @@
 /*
  * cmcat - local llm, from scratch, in C.
- * Copyright (C) 2026 technologfyiscool47
+ * Copyright (C) 2026 technologyiscool47
  *
  * This program is free software (both as in free beer and as in freedom):
  * you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
  *
- * Commercial licensinfg is available. technologfyiscool47 is active on the following platforms:
- * - Neocities (https://technologfyiscool47.neocities.com)
- * - GitHub (https://github.com/technologfyiscool47)
- * - E-mail (technologfyiscool47@gmail.com)
+ * Commercial licensing is available. technologyiscool47 is active on the following platforms:
+ * - Neocities (https://technologyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologyiscool47)
+ * - E-mail (technologyiscool47@gmail.com)
  * Contact the author for details.
  *
  * This program is distributed in the hope that it will be useful,
@@ -24,7 +24,7 @@ int main() {
     int merges_a[2000], merges_b[2000]; int num_merges;
     loadBPE("tokenizer.bin", merges_a, merges_b, &num_merges); // Load BPE before creating the model variables. trust
 
-    int vocab_size = 256 + num_merges, d_model = 64, num_blocks = 2, hidden_size = 64, seq_len = 16, stops = 20000; // creating model variables
+    int vocab_size = 256 + num_merges, d_model = 128, num_blocks = 3, hidden_size = 256, seq_len = 16, stops = 20000; // creating model variables
     srand(47); // set random seed
 
     embedding *embed = createEmbedding(vocab_size, d_model); // model architecture stuffembedding stuff
@@ -39,7 +39,6 @@ int main() {
 
     unembed.packed_weights = NULL;
     unembed.unpacked_weights = NULL;
-    quantizeAndPack(unembed.weights, &unembed.packed_weights, &unembed.scale); // very super important
     for (int i = 0; i < net->num_blocks; i++) { // repack transformer blocks
         quantizeAndPack(net->blocks[i]->wq.weights, &net->blocks[i]->wq.packed_weights, &net->blocks[i]->wq.scale);
         quantizeAndPack(net->blocks[i]->wk.weights, &net->blocks[i]->wk.packed_weights, &net->blocks[i]->wk.scale);
@@ -120,6 +119,12 @@ int main() {
             logits = unembeddingForward(net_out, &unembed);
 
         }
+
+        // Mask out untrained high bytes (128-255)
+        for (int j = 128; j < 256; j++) setVal(logits, 0, j, 0.0f);
+        float prob_sum = 0.0f;
+        for (int j = 0; j < vocab_size; j++) prob_sum += getVal(logits, 0, j);
+        for (int j = 0; j < vocab_size; j++) setVal(logits, 0, j, getVal(logits, 0, j) / prob_sum);
 
         // Sampling
         double r = (double)rand() / RAND_MAX;

@@ -1,15 +1,15 @@
 /*
  * cmcat - local llm, from scratch, in C.
- * Copyright (C) 2026 technologfyiscool47
+ * Copyright (C) 2026 technologyiscool47
  *
  * This program is free software (both as in free beer and as in freedom):
  * you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License v3.0 as published by the Free Software Foundation.
  *
- * Commercial licensinfg is available. technologfyiscool47 is active on the following platforms:
- * - Neocities (https://technologfyiscool47.neocities.com)
- * - GitHub (https://github.com/technologfyiscool47)
- * - E-mail (technologfyiscool47@gmail.com)
+ * Commercial licensing is available. technologyiscool47 is active on the following platforms:
+ * - Neocities (https://technologyiscool47.neocities.com)
+ * - GitHub (https://github.com/technologyiscool47)
+ * - E-mail (technologyiscool47@gmail.com)
  * Contact the author for details.
  *
  * This program is distributed in the hope that it will be useful,

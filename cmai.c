@@ -441,7 +441,7 @@ void clipGradients(matrix *m, float max_norm) { // gradient clipping to stop the
     int i;
 
     for (i = 0; i < m->rows * m->columns; i++) { // hklsfzhkfgzyl
-        if (isnan(m->data[i]) || isinff(m->data[i])) { // if we encounter infinity or a nan, reset gradient to 0
+        if (isnan(m->data[i]) || isinf(m->data[i])) { // if we encounter infinity or a nan, reset gradient to 0
             for (i = 0; i < m->rows * m->columns; i++) m->data[i] = 0.0f;
             return;
         }
@@ -1170,14 +1170,16 @@ void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_
     freeMatrix(weight_grad); // free the temporary matrix
 }
 
-matrix *unembeddingForward(matrix *input, layer *unembed) { // unembedding forward pass (which i HATE)
-    matrix *preact = newMatrix(input->rows, unembed->weights->columns); // preact matrix
-    matrix *logits = forward(unembed, input, preact); // logits matrix, forward pass
-
-    freeMatrix(preact); // frees preact matrix
-    softmax(logits); // softmaxes the logits
-
-    return logits; // returns the logits
+matrix *unembeddingForward(matrix *input, layer *unembed) { // float unembedding forward pass
+    matrix *logits = multiplyMatrix(input, unembed->weights); // logits
+    // Add biases
+    for (int i = 0; i < logits->rows; i++) {
+        for (int j = 0; j < logits->columns; j++) {
+            logits->data[i * logits->columns + j] += unembed->biases->data[j];
+        }
+    }
+    softmax(logits); // softmax
+    return logits; // returns
 }
 
 typedef struct { // new struct!!!! transformer networksssss
