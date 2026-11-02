@@ -26,7 +26,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
     trainBPE("tinystories_0.5mb.txt", 500, merges_a, merges_b, &num_merges); // trains and saves bpe on file
     saveBPE("tokenizer.bin", merges_a, merges_b, num_merges); // saves bpe
 
-    int vocab_size = 256 + num_merges, d_model = 128, num_blocks = 3, hidden_size = 256, seq_len = 16, stops = 20000; // training variables and parameters
+    int vocab_size = 256 + num_merges, d_model = 128, num_blocks = 3, hidden_size = 256, seq_len = 16, stops = 500; // training variables and parameters
     float learning_rate = 0.001; // also a training variable
     srand(47);
 
@@ -80,9 +80,11 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
 
         transformer_cache **caches = malloc(net->num_blocks * sizeof(transformer_cache *)); // allocate caches
         matrix *net_out = transformerNetworkForward(embed_out, net, caches); // pass through the transformer block
-        matrix *logits = unembeddingForward(net_out, &unembed); // pass through the unembedding layer to get probabilities
+        float Z = 0.0f; // logsumexp of the logits. z-loss watches this number
+        matrix *logits = unembeddingForward(net_out, &unembed, &Z); // pass through the unembedding layer to get probabilities
 
         float loss = crossEntropyLoss(logits, target_tokens); // That one ctrl alt delete comic
+        loss += Z_LAMBDA * Z * Z; // z-loss: a small electric fence around the logits
 
         loss_sum += loss;
         if (stop % 100 == 0) {
@@ -91,7 +93,7 @@ int main(){ // main training loop. as of now train.c is mostly a test, it isnt w
         }
 
         matrix *output_grad = newMatrix(logits->rows, logits->columns); // backprop time. output gradient
-        crossEntropyLossGradient(logits, target_tokens, output_grad); // calculate loss
+        crossEntropyLossGradient(logits, target_tokens, output_grad, Z); // calculate loss
         clipGradients(output_grad, 1.0f); // Don't let the gradients explode!
 
         matrix *unembed_preact = newMatrix(net_out->rows, unembed.weights->columns); // I didn't cache this, but backward() needs it so

@@ -26,6 +26,7 @@
 #include <omp.h> // for multi threading
 
 #define LN_EPSILON 1e-5f // super small number. is used later on
+#define Z_LAMBDA 1e-3f // z-loss strength. keeps the logits from drifting into the softmax danger zone. also half life
 #define NUM_KV_GROUPS 2 // kv groups
 #define MAX_CONTEXT 256 // Maximum tokens the kv cache can hold
 #define NUM_HEADS 8 // Spiders usually have 4 pairs of eyes, having 8 eyes in total. This line declares 8 heads for multi head attention. Attention heads are like eyes.
@@ -292,36 +293,53 @@ void quantizeAndPack(matrix *float_weights, uint8_t **packed_weights, float *sca
     }
 }
 
-typedef struct { // adam optimizer. sgd (was used previously) is bad so i gotta use this
+typedef struct { // adam optimizer, but ADOPT flavored now
     matrix *m; // First moment
-    matrix *v; // Second moment
+    matrix *v; // Second moment (built from the previous gradient now. long story, its adopt)
+    matrix *g_prev; // yesterday's gradient. ADOPT needs it for v
     int t;     // Timestep
 } adam_state; // Alias
 
-adam_state *createAdamState(matrix *weights) { // creates an adam state opti,izer thing
+adam_state *createAdamState(matrix *weights) { // creates an adam state optimizer thing
     adam_state *state = malloc(sizeof(adam_state)); // allocates
     state->m = newPersistentMatrix(weights->rows, weights->columns); // creates matrices
     state->v = newPersistentMatrix(weights->rows, weights->columns);
+    state->g_prev = newPersistentMatrix(weights->rows, weights->columns);
     state->t = 0; // sets timestep to 0
     return state; // returns state
 }
 
-void adamUpdate(matrix *weights, matrix *grads, adam_state *state, float lr) { // updates adam
+void adamUpdate(matrix *weights, matrix *grads, adam_state *state, float lr) { // updates adam. now ADOPT + cautious
     state->t++; // increments timestep
-    float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f; //  beta 1, beta 2 and epsilon but different
+    float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f; // floatsss
+    float bias1 = 1.0f - powf(beta1, state->t); // bias correction for the first moment only now
 
-    float bias1 = 1.0f - powf(beta1, state->t);
-    float bias2 = 1.0f - powf(beta2, state->t);
-
-    for (int i = 0; i < weights->rows * weights->columns; i++) { // adam update of mystery. powf no more
+    for (int i = 0; i < weights->rows * weights->columns; i++) {
         float g = grads->data[i];
-        state->m->data[i] = beta1 * state->m->data[i] + (1.0f - beta1) * g; // math
-        state->v->data[i] = beta2 * state->v->data[i] + (1.0f - beta2) * g * g;
+
+        if (state->t == 1) { // v starts as g*g and the update is basically just "go that way"
+            state->m->data[i] = g;
+            state->v->data[i] = g * g;
+            state->g_prev->data[i] = g;
+            weights->data[i] -= lr * g / (sqrtf(g * g) + eps);
+            continue;
+        }
+
+        state->m->data[i] = beta1 * state->m->data[i] + (1.0f - beta1) * g; // today's gradient
+        state->v->data[i] = beta2 * state->v->data[i] + (1.0f - beta2)
+        * state->g_prev->data[i] * state->g_prev->data[i]; // second moment: YESTERDAY'S gradient (adopt)
 
         float m_hat = state->m->data[i] / bias1;
-        float v_hat = state->v->data[i] / bias2;
+        float v_now = state->v->data[i];
+        float v_floor = (1.0f - beta2) * g * g;
+        if (v_now < v_floor) v_now = v_floor;
 
-        weights->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps); // updates
+        float update = m_hat / (sqrtf(v_now) + eps); // no bias2 correction needed anymore. also one less powf >:)
+
+        if (update * g <= 0.0f) update = 0.0f; // cautious: if the update and the current gradient disagree, dont move at all
+
+        weights->data[i] -= lr * update;
+        state->g_prev->data[i] = g; // remember today's gradient for tomorrow's v
     }
 }
 
@@ -592,6 +610,48 @@ matrix *rmsNorm(matrix *m) { // rmsnorm. much newer and faster than layernorm an
     return out; // returns
 }
 
+void qkNormProjectorInPlace(matrix *grad, matrix *y, int num_groups) { /* qk-norm backward (the important part of it).
+                                                                          the norm annihilates any RADIAL change to a head's q/k vector, so the radial component
+                                                                          of the gradient is pure noise. this subtracts it: grad <- grad - y * mean(grad*y) per
+                                                                          head slice. the missing 1/rms scalar is skipped on purpose: omitting it just acts as a
+                                                                          mild per-head gradient scale. */
+
+    int group_dim = y->columns / num_groups; // group dimensions
+    for (int i = 0; i < y->rows; i++) {
+        for (int g = 0; g < num_groups; g++) {
+            int base = i * y->columns + g * group_dim;
+            float dot = 0.0f;
+            for (int d = 0; d < group_dim; d++)
+                dot += grad->data[base + d] * y->data[base + d];
+            dot /= group_dim;
+            for (int d = 0; d < group_dim; d++)
+                grad->data[base + d] -= dot * y->data[base + d]; // bye bye radial component
+        }
+    }
+}
+
+void qkNormInPlace(matrix *m, int num_groups) { /* qk-norm. normalizes each head's slice of each row, IN PLACE
+                                                   its in place on purpose, cache->Q and cache->K point at the same memory, so backward
+                                                   automatically stays consistent with forward. also: normalizing an already normalized
+                                                   vector does nothing, so accidentally calling it twice is harmless */
+
+    int group_dim = m->columns / num_groups; // head_dim for each group slice
+    for (int i = 0; i < m->rows; i++) {
+        for (int g = 0; g < num_groups; g++) {
+            float ms = 0.0f;
+            int base = i * m->columns + g * group_dim;
+            for (int d = 0; d < group_dim; d++) {
+                float v = m->data[base + d];
+                ms += v * v;
+            }
+            ms /= group_dim;
+            float rms = sqrtf(ms + LN_EPSILON);
+            for (int d = 0; d < group_dim; d++)
+                m->data[base + d] /= rms; // every head's q (or k) vector now has RMS 1
+        }
+    }
+}
+
 /* ------------ *\
    | Networks |
 \* ------------ */
@@ -794,6 +854,9 @@ matrix *attention(matrix *queries, matrix *keys, matrix *values) { // Multi-Head
     int d_model = queries->columns;
     int head_dim = d_model / NUM_HEADS; // dimensions per head
     int kv_dim = head_dim * NUM_KV_GROUPS; // kv dimensions
+
+    qkNormInPlace(queries, NUM_HEADS); // qk-norm, bound the attention logits at the source
+    qkNormInPlace(keys, NUM_KV_GROUPS);
 
     applyRoPE(queries, seq_len, d_model, 0, 0);
     applyRoPE(keys, seq_len, kv_dim, 0, 0); // kv
@@ -1025,11 +1088,14 @@ void freeLayer(layer *l) { // function to free a layer
     if (l->weight_adam != NULL) { // Free Adam states
         freePersistentMatrix(l->weight_adam->m);
         freePersistentMatrix(l->weight_adam->v);
+        freePersistentMatrix(l->weight_adam->g_prev);
         free(l->weight_adam);
     }
+
     if (l->bias_adam != NULL) {
         freePersistentMatrix(l->bias_adam->m);
         freePersistentMatrix(l->bias_adam->v);
+        freePersistentMatrix(l->bias_adam->g_prev);
         free(l->bias_adam);
     }
 }
@@ -1124,6 +1190,12 @@ embedding *createEmbedding(int vocab_size, int embedding_dim) { // new function,
 void freeEmbedding(embedding *e) { // frees an embedding
     if (e == NULL) return; // error handling
     freePersistentMatrix(e->weights); // free the lookup table
+
+    freePersistentMatrix(e->weight_adam->m);
+    freePersistentMatrix(e->weight_adam->v);
+    freePersistentMatrix(e->weight_adam->g_prev);
+    free(e->weight_adam);
+
     free(e); // free the struct
 }
 
@@ -1170,7 +1242,7 @@ void embeddingBackward(embedding *e, int *token_ids, int seq_len, matrix *input_
     freeMatrix(weight_grad); // free the temporary matrix
 }
 
-matrix *unembeddingForward(matrix *input, layer *unembed) { // float unembedding forward pass
+matrix *unembeddingForward(matrix *input, layer *unembed, float *z_out) { // float unembedding forward pass
     matrix *logits = multiplyMatrix(input, unembed->weights); // logits
     // Add biases
     for (int i = 0; i < logits->rows; i++) {
@@ -1178,6 +1250,22 @@ matrix *unembeddingForward(matrix *input, layer *unembed) { // float unembedding
             logits->data[i * logits->columns + j] += unembed->biases->data[j];
         }
     }
+
+    if (z_out != NULL) { // z-loss bookkeeping. must happen BEFORE softmax eats the logits
+        float z_sum = 0.0f;
+        for (int i = 0; i < logits->rows; i++) {
+            float max_val = logits->data[i * logits->columns];
+            for (int j = 0; j < logits->columns; j++)
+                if (logits->data[i * logits->columns + j] > max_val)
+                    max_val = logits->data[i * logits->columns + j];
+            float sum = 0.0f;
+            for (int j = 0; j < logits->columns; j++)
+                sum += expf(logits->data[i * logits->columns + j] - max_val); // subtract max so exp doesnt explode
+            z_sum += max_val + logf(sum); // this is log(sum(exp(logit))) for this row
+        }
+        *z_out = z_sum / logits->rows; // average over the sequence
+    }
+
     softmax(logits); // softmax
     return logits; // returns
 }
@@ -1239,18 +1327,16 @@ float crossEntropyLoss(matrix *predicted, int *target_tokens) { // cross entropy
     return loss; //returns
 }
 
-void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *output_grad) { // cross entropy loss gradient thing. basically, when training, you have to use a combination of the loss
-    int i, j; // loop variable                                                              // and softmax and it is very complicated, however, when you simplify the big scary equation you literally
-    for (i = 0; i < predicted->rows; i++) { // rows loop                                    // get is taking your predicted probabilities, and subtract 1 from the correct answer
+void crossEntropyLossGradient(matrix *predicted, int *target_tokens, matrix *output_grad, float z_logsumexp) { // cross entropy + z loss gradient
+    int i, j; // loop variable
+    for (i = 0; i < predicted->rows; i++) { // rows loop
         int target = target_tokens[i]; // target
 
         for (j = 0; j < predicted->columns; j++) { // column loop
             float prob = getVal(predicted, i, j); // probablility
-
-            if (j == target) // if ai got it right
-                setVal(output_grad, i, j, (prob - 1.0f) / predicted->rows); // nudge it towards more confidence
-            else // else
-                setVal(output_grad, i, j, (prob - 0.0f) / predicted->rows); // nudge it towards the right answer
+            float base = (j == target) ? (prob - 1.0f) : prob; // the famous "p minus onehot"
+            float z_term = 2.0f * Z_LAMBDA * z_logsumexp * prob; // z-loss: pushes every logit down equally when the whole row drifts
+            setVal(output_grad, i, j, (base + z_term) / predicted->rows);
         }
     }
 }
@@ -1358,6 +1444,9 @@ void attentionBackward(matrix *Q, matrix *K, matrix *V, matrix *attn_out_grad, m
         freeMatrix(S);
         freeMatrix(s_g);
     }
+
+    qkNormProjectorInPlace(q_g, Q, NUM_HEADS);
+    qkNormProjectorInPlace(k_g, K, NUM_KV_GROUPS);
 
     applyRoPE(q_g, seq_len, d_model, 1, 0);
     applyRoPE(k_g, seq_len, kv_dim, 1, 0); // Keys are now kv_dim!
@@ -1502,8 +1591,10 @@ matrix *transformerForwardStep(matrix *input, transformer_block *block, kv_cache
     matrix *preact_v = newMatrix(1, kv_dim);
     matrix *V_new = forward(&block->wv, norm1, preact_v);
 
+    qkNormInPlace(Q, NUM_HEADS);
+    qkNormInPlace(K_new, NUM_KV_GROUPS);
 
-    applyRoPE(Q, 1, d_model, 0, kv->len);// Apply rope
+    applyRoPE(Q, 1, d_model, 0, kv->len); // Apply rope
     applyRoPE(K_new, 1, kv_dim, 0, kv->len);
 
 

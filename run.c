@@ -91,7 +91,7 @@ int main() {
             matrix *embed_out = embeddingForward(embed, input_tokens, seq_len);
             transformer_cache **caches = malloc(net->num_blocks * sizeof(transformer_cache *));
             net_out = transformerNetworkForward(embed_out, net, caches);
-            logits = unembeddingForward(net_out, &unembed);
+            logits = unembeddingForward(net_out, &unembed, NULL);
 
             // Copy K and V into the persistent KV Cache
             for (int b = 0; b < net->num_blocks; b++) {
@@ -116,7 +116,7 @@ int main() {
             matrix *embed_out = embeddingForward(embed, single_token, 1);
 
             net_out = transformerNetworkForwardStep(embed_out, net, kv_caches);
-            logits = unembeddingForward(net_out, &unembed);
+            logits = unembeddingForward(net_out, &unembed, NULL);
 
         }
 
